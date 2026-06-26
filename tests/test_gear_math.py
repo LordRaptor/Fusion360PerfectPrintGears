@@ -17,7 +17,7 @@ def test_derived_geometry_matches_hand_calc():
 
 # tests/test_gear_math.py  (append)
 def _valid_inputs(**over):
-    base = dict(wheel_teeth=50, pinion_teeth=10, module_mm=1.0,
+    base = dict(wheel_teeth=50, pinion_teeth=10, module_mm=1.5,
                 feature_width_mm=2.388, clearance_mm=0.1)
     base.update(over)
     return gm.GearInputs(**base)
@@ -43,9 +43,12 @@ def test_validate_rejects_nonpositive_module():
 
 
 def test_validate_rejects_feature_width_causing_overlap():
-    # feature width wider than the circular pitch guarantees overlapping teeth
+    # A wheel tooth narrowed by clearance plus the pinion tooth must fit within
+    # one circular pitch: 2*feature_width - clearance < circular_pitch. At
+    # module 1.5 the circular pitch is ~4.712; feature_width 4.0 gives
+    # 2*4.0 - 0.1 = 7.9 > 4.712, so the teeth would overlap.
     with pytest.raises(ValueError, match="feature width"):
-        gm.validate_inputs(_valid_inputs(module_mm=1.0, feature_width_mm=4.0))
+        gm.validate_inputs(_valid_inputs(module_mm=1.5, feature_width_mm=4.0))
 
 
 def test_validate_rejects_clearance_ge_feature_width():
@@ -80,7 +83,7 @@ def test_wheel_tip_envelope_spans_pitch_to_centerline():
     inp = _valid_inputs(wheel_teeth=50, pinion_teeth=10, module_mm=1.0,
                         feature_width_mm=2.388, clearance_mm=0.0, resolution=40)
     geo = gm.derive_geometry(inp)
-    pts = gm.wheel_tip_halfprofile(inp, geo)
+    pts = gm.wheel_tip_envelope(inp, geo)
 
     assert len(pts) >= 5
     radii = [math.hypot(x, y) for (x, y) in pts]
@@ -103,21 +106,64 @@ def test_wheel_tip_envelope_spans_pitch_to_centerline():
 
 # tests/test_gear_math.py  (append)
 def test_wheel_tooth_segments_are_connected_and_typed():
-    inp = _valid_inputs(module_mm=1.0, feature_width_mm=2.388, clearance_mm=0.1,
+    inp = _valid_inputs(module_mm=1.5, feature_width_mm=2.388, clearance_mm=0.1,
                         resolution=40)
     geo = gm.derive_geometry(inp)
     segs = gm.build_wheel_tooth(inp, geo)
 
+    # Cycloidal tooth: lower flank (line) -> lower tip (spline) ->
+    # upper tip (spline) -> upper flank (line). Two splines for the tip.
+    assert len(segs) == 4
     kinds = [s.kind for s in segs]
+    assert kinds == ['line', 'spline', 'spline', 'line']
     assert kinds.count('spline') == 2          # mirrored tip halves
-    assert 'line' in kinds                       # flanks + root
     # Consecutive segments share endpoints (a continuous path).
     for cur, nxt in zip(segs, segs[1:]):
         assert cur.points[-1][0] == pytest.approx(nxt.points[0][0], abs=1e-6)
         assert cur.points[-1][1] == pytest.approx(nxt.points[0][1], abs=1e-6)
-    # The apex of the tip sits on the tooth centerline (x-axis).
+
+    # The apex of the tip sits where the two splines meet, on the tooth
+    # centerline (x-axis).
     apex = segs[1].points[-1]
-    assert apex[1] == pytest.approx(0.0, abs=1e-6)
+    assert apex == pytest.approx(segs[2].points[0], abs=1e-9)
+    assert apex[1] == pytest.approx(0.0, abs=1e-9)
+
+    # Real addendum: the apex rises above the pitch circle.
+    apex_r = math.hypot(apex[0], apex[1])
+    assert apex_r > geo.pitch_radius_wheel
+    assert apex_r < geo.pitch_radius_wheel + 2.0 * inp.module_mm
+
+    # Clearance narrows the tooth: each flank sits at half_w = (fw - clr)/2.
+    expected_half_w = (inp.feature_width_mm - inp.clearance_mm) / 2.0
+    upper_flank = segs[3]
+    for pt in upper_flank.points:
+        assert pt[1] == pytest.approx(expected_half_w, abs=1e-9)
+
+
+def test_wheel_tooth_clearance_narrows_tooth():
+    geo_in = dict(wheel_teeth=50, pinion_teeth=10, module_mm=1.5,
+                  feature_width_mm=2.388, resolution=40)
+    wide = gm.GearInputs(clearance_mm=0.0, **geo_in)
+    narrow = gm.GearInputs(clearance_mm=0.4, **geo_in)
+    geo = gm.derive_geometry(wide)
+
+    def flank_y(inp):
+        segs = gm.build_wheel_tooth(inp, geo)
+        return segs[3].points[0][1]            # upper flank +y offset
+
+    # Larger clearance pulls the flank inward (smaller +y offset).
+    assert flank_y(narrow) < flank_y(wide)
+    assert flank_y(narrow) == pytest.approx((2.388 - 0.4) / 2.0, abs=1e-9)
+
+
+def test_build_wheel_tooth_envelope_method_runs():
+    # The preserved Peterson approach must still run without crashing.
+    inp = _valid_inputs(module_mm=1.5, feature_width_mm=2.388, clearance_mm=0.1,
+                        resolution=40)
+    geo = gm.derive_geometry(inp)
+    segs = gm.build_wheel_tooth(inp, geo, method='envelope')
+    assert len(segs) == 4
+    assert [s.kind for s in segs] == ['line', 'spline', 'spline', 'line']
 
 
 # tests/test_gear_math.py  (append)
@@ -149,23 +195,25 @@ def test_array_tooth_produces_n_copies():
 
 
 def test_build_gear_pair_places_centers_for_meshing():
-    inp = _valid_inputs(wheel_teeth=50, pinion_teeth=10, module_mm=1.0,
+    inp = _valid_inputs(wheel_teeth=50, pinion_teeth=10, module_mm=1.5,
                         feature_width_mm=2.388, clearance_mm=0.1, resolution=40)
     pair = gm.build_gear_pair(inp)
-    assert pair.center_distance == pytest.approx(30.0)
+    rw = 1.5 * 50 / 2.0
+    rp = 1.5 * 10 / 2.0
+    assert pair.center_distance == pytest.approx(rw + rp)
     assert pair.wheel.center == pytest.approx((0.0, 0.0))
-    assert pair.pinion.center == pytest.approx((30.0, 0.0))
+    assert pair.pinion.center == pytest.approx((rw + rp, 0.0))
     assert pair.wheel.teeth == 50 and pair.pinion.teeth == 10
     assert len(pair.wheel.segments) == 50 * 5      # 4 tooth segments + 1 root bridge
     assert len(pair.pinion.segments) == 10 * 4     # 3 tooth segments + 1 root bridge
-    assert pair.wheel.pitch_radius == pytest.approx(25.0)
-    assert pair.pinion.pitch_radius == pytest.approx(5.0)
+    assert pair.wheel.pitch_radius == pytest.approx(rw)
+    assert pair.pinion.pitch_radius == pytest.approx(rp)
 
 
 # tests/test_gear_math.py  (append)
 def test_peterson_50_10_example_is_sane():
     # 50T wheel, 10T pinion, 5:1 (the worked example in the document).
-    inp = _valid_inputs(wheel_teeth=50, pinion_teeth=10, module_mm=1.0,
+    inp = _valid_inputs(wheel_teeth=50, pinion_teeth=10, module_mm=1.5,
                         feature_width_mm=2.388, clearance_mm=0.1, resolution=48)
     pair = gm.build_gear_pair(inp)
 
@@ -191,7 +239,7 @@ def test_peterson_50_10_example_is_sane():
 # tests/test_gear_math.py  (append)
 def test_other_ratio_60_8_builds():
     inp = _valid_inputs(wheel_teeth=60, pinion_teeth=8, module_mm=0.8,
-                        feature_width_mm=1.6, clearance_mm=0.08, resolution=48)
+                        feature_width_mm=1.0, clearance_mm=0.08, resolution=48)
     pair = gm.build_gear_pair(inp)
     assert len(pair.wheel.segments) == 60 * 5
     assert len(pair.pinion.segments) == 8 * 4

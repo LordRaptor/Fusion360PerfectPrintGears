@@ -61,9 +61,13 @@ def validate_inputs(inp: GearInputs) -> None:
         raise ValueError("feature width must be greater than 0")
 
     geo = derive_geometry(inp)
-    # Teeth would touch/overlap if the tooth is wider than the tooth-to-tooth spacing.
-    # Require the tooth to occupy less than the circular pitch so a real gap remains.
-    if inp.feature_width_mm >= geo.circular_pitch:
+    # Meshing constraint: a wheel tooth (narrowed by the clearance) plus the pinion
+    # tooth it meshes against must fit within one circular pitch, otherwise the
+    # wheel tooth cannot fit the pinion gap and the teeth overlap. The wheel tooth
+    # contributes (feature_width - clearance); the pinion gap is one pitch minus
+    # the full pinion feature_width, so the requirement is:
+    #     2*feature_width - clearance < circular_pitch.
+    if 2.0 * inp.feature_width_mm - inp.clearance_mm >= geo.circular_pitch:
         raise ValueError(
             "feature width is too large for this module/teeth (teeth would overlap); "
             "reduce feature width or increase module"
@@ -99,8 +103,8 @@ def line_intersection(p1: Point, p2: Point, p3: Point, p4: Point):
     return (px, py)
 
 
-def wheel_tip_halfprofile(inp: GearInputs, geo: DerivedGeometry,
-                          pinion_dir: int = 1, wheel_dir: int = 1) -> List[Point]:
+def wheel_tip_envelope(inp: GearInputs, geo: DerivedGeometry,
+                       pinion_dir: int = 1, wheel_dir: int = 1) -> List[Point]:
     """Half of the wheel tooth tip, generated as the conjugate envelope of the
     moving pinion flank. Returns points ordered from the pitch-circle end to the
     tooth-centerline apex, in wheel-centered coordinates (mm), on the +x side.
@@ -172,12 +176,86 @@ def _polar(r: float, ang: float) -> Point:
     return (r * math.cos(ang), r * math.sin(ang))
 
 
-def build_wheel_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
-    """One wheel tooth centered on the +x axis, as a connected list of Segments,
-    ordered counter-clockwise: lower root -> lower flank -> tip (2 splines) ->
-    upper flank -> upper root. Clearance narrows the tooth (both flanks pulled in).
+def radius_at_angle(a: float, pinion_teeth: int, wheel_teeth: int) -> float:
+    """Epicycloid radius (pitch circle = unit) at angle `a` measured from the
+    tooth edge. Ported exactly from the validated prototype's `radiusAtAngle`
+    (FusionCycloidalGears / Keveney). Returns 1.0 (pitch circle) at a==0 and grows
+    as the angle approaches the apex.
     """
-    tip = wheel_tip_halfprofile(inp, geo)            # pitch-end -> apex, upper (+y) side
+    if a == 0:
+        return 1.0
+    error_limit = 1e-9
+    t0 = 1.0
+    t1 = 0.0
+    b = 0.0
+    r2 = 2.0 * wheel_teeth / pinion_teeth
+    rg = 1.0 / r2
+    while abs(t1 - t0) > error_limit:
+        t0 = t1
+        b = math.atan2(math.sin(t0), (1.0 + r2 - math.cos(t0)))
+        t1 = r2 * (a + b)
+    return (math.sin(t1) * rg) / math.sin(b)
+
+
+def _build_wheel_tooth_cycloidal(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
+    """Cycloidal wheel tooth centered on the +x axis (ported from the prototype's
+    `wheel_tooth`): epicycloidal addendum (edge at the pitch circle, apex on the
+    tooth centerline) scaled by the wheel pitch radius, plus constant-width
+    straight dedendum flanks down to root feet. Clearance narrows the tooth by
+    pulling the effective half-width in by clearance/2 on each side.
+
+    Returned as a connected counter-clockwise list of Segments:
+      lower flank (line) -> lower tip half (spline) -> upper tip half (spline)
+      -> upper flank (line). Two splines for the tip, meeting at the apex.
+    """
+    rw = geo.pitch_radius_wheel
+    # Clearance narrows the wheel tooth: reduce the effective half-width.
+    half_w = inp.feature_width_mm / 2.0 - inp.clearance_mm / 2.0
+    if half_w <= 0:
+        raise ValueError("clearance narrows the wheel tooth to zero width")
+
+    w_amid = math.asin(half_w / rw)        # half tooth angle at the pitch circle
+    root_radius = rw - (inp.module_mm * 1.25 * inp.dedendum_factor)
+    steps = max(8, inp.resolution)
+
+    # Addendum upper half: angle aa runs 0 (at the edge / pitch circle) -> w_amid
+    # (at the apex). radius_at_angle measures angle from the edge; the absolute
+    # angle from the centerline is (w_amid - aa).
+    upper: List[Point] = []
+    for n in range(steps + 1):
+        aa = w_amid * n / steps
+        r = radius_at_angle(aa, inp.pinion_teeth, inp.wheel_teeth) * rw
+        ang = w_amid - aa
+        upper.append((math.cos(ang) * r, math.sin(ang) * r))
+
+    apex = (upper[-1][0], 0.0)                 # apex forced onto the centerline
+    edge = upper[0]                            # at the pitch circle, angle +w_amid
+    # Straight constant-width flank: foot at the root radius, offset +half_w.
+    foot = (math.sqrt(max(root_radius ** 2 - half_w ** 2, 0.0)), half_w)
+
+    # upper tip ordered apex -> edge (so spline goes apex outward to the pitch end)
+    upper_tip = [apex] + list(reversed(upper))   # apex .. edge
+    lower_tip = [(x, -y) for (x, y) in upper_tip]
+    upper_foot = foot
+    lower_foot = (foot[0], -foot[1])
+
+    # Connected counter-clockwise path:
+    #   lower flank (foot->edge) -> lower tip (edge->apex) -> upper tip (apex->edge)
+    #   -> upper flank (edge->foot)
+    segs: List[Segment] = []
+    segs.append(Segment('line', [lower_foot, lower_tip[-1]]))          # lower flank
+    segs.append(Segment('spline', list(reversed(lower_tip))))         # edge -> apex (lower)
+    segs.append(Segment('spline', upper_tip))                         # apex -> edge (upper)
+    segs.append(Segment('line', [upper_tip[-1], upper_foot]))         # upper flank
+    return segs
+
+
+def _build_wheel_tooth_envelope(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
+    """Conjugate-envelope wheel tooth (the preserved Peterson approach), assembled
+    the way the old build_wheel_tooth did. Known-imperfect; kept runnable so we
+    can return to it later via method='envelope'.
+    """
+    tip = wheel_tip_envelope(inp, geo)               # pitch-end -> apex, upper (+y) side
     if not tip:
         raise ValueError("could not generate wheel tip envelope")
 
@@ -208,6 +286,24 @@ def build_wheel_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
     segs.append(Segment('spline', [apex] + list(reversed(upper_tip))))    # apex -> upper pitch-end
     segs.append(Segment('line', [upper_tip[0], upper_root_pt]))           # upper flank
     return segs
+
+
+def build_wheel_tooth(inp: GearInputs, geo: DerivedGeometry,
+                      method: str = 'cycloidal') -> List[Segment]:
+    """One wheel tooth centered on the +x axis, as a connected counter-clockwise
+    list of Segments: lower flank (line) -> tip (2 splines meeting at the apex) ->
+    upper flank (line). Clearance narrows the wheel tooth.
+
+    method='cycloidal' (default): epicycloidal addendum via radius_at_angle, the
+        validated/meshing geometry ported from the prototype.
+    method='envelope': the preserved Peterson conjugate-envelope approach
+        (known-imperfect, kept runnable for future work).
+    """
+    if method == 'cycloidal':
+        return _build_wheel_tooth_cycloidal(inp, geo)
+    if method == 'envelope':
+        return _build_wheel_tooth_envelope(inp, geo)
+    raise ValueError(f"unknown wheel-tip method: {method!r}")
 
 
 def build_pinion_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
@@ -306,7 +402,11 @@ def build_gear_pair(inp: GearInputs) -> GearPair:
 
     wheel_segs = close_gear_loop(wheel_tooth, inp.wheel_teeth, base_angle=0.0)
     # Pinion tooth points toward the wheel (-x from the pinion centre) to mesh.
-    pinion_segs = close_gear_loop(pinion_tooth, inp.pinion_teeth, base_angle=math.pi)
+    # Offset by half a pinion pitch so a pinion tooth-GAP faces each wheel tooth
+    # (the wheel tooth must enter the pinion gap, not collide with a pinion tooth).
+    pinion_half_pitch = math.pi / inp.pinion_teeth
+    pinion_segs = close_gear_loop(pinion_tooth, inp.pinion_teeth,
+                                  base_angle=math.pi + pinion_half_pitch)
 
     w_root, w_add = _radii(wheel_segs)
     p_root, p_add = _radii(pinion_segs)
