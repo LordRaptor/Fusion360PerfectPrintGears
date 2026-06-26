@@ -44,3 +44,34 @@ def derive_geometry(inp: GearInputs) -> DerivedGeometry:
         ratio=inp.wheel_teeth / inp.pinion_teeth,
         circular_pitch=math.pi * inp.module_mm,
     )
+
+
+MIN_PINION_TEETH = 6
+
+
+def validate_inputs(inp: GearInputs) -> None:
+    """Raise ValueError with a human-readable message if inputs are unusable."""
+    if inp.pinion_teeth < MIN_PINION_TEETH:
+        raise ValueError(f"pinion teeth must be at least {MIN_PINION_TEETH}")
+    if inp.wheel_teeth < inp.pinion_teeth:
+        raise ValueError("wheel teeth must be >= pinion teeth")
+    if inp.module_mm <= 0:
+        raise ValueError("module must be greater than 0")
+    if inp.feature_width_mm <= 0:
+        raise ValueError("feature width must be greater than 0")
+
+    geo = derive_geometry(inp)
+    # Teeth would touch/overlap if the tooth is wider than the tooth-to-tooth spacing.
+    # Require the tooth to occupy less than the circular pitch so a real gap remains.
+    if inp.feature_width_mm >= geo.circular_pitch:
+        raise ValueError(
+            "feature width is too large for this module/teeth (teeth would overlap); "
+            "reduce feature width or increase module"
+        )
+    # Pinion flanks (offset half-width from a radial) must not cross the pinion centre.
+    if inp.feature_width_mm / 2.0 >= geo.pitch_radius_pinion:
+        raise ValueError("feature width is too large for the pinion size")
+    if inp.clearance_mm < 0:
+        raise ValueError("clearance must be >= 0")
+    if inp.clearance_mm >= inp.feature_width_mm:
+        raise ValueError("clearance must be less than the feature width")
