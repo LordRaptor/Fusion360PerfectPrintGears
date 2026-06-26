@@ -314,10 +314,12 @@ def build_pinion_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
     """
     half_w = inp.feature_width_mm / 2.0
     root_radius = geo.pitch_radius_pinion - (inp.module_mm * 1.25 * inp.dedendum_factor)
-    # Pinion addendum: flanks extend a little past the pitch circle, then a
-    # semicircular cap of radius half_w. Tip apex height chosen so the cap is a
-    # clean semicircle just beyond the pitch radius.
-    flank_top_x = geo.pitch_radius_pinion + (inp.module_mm * inp.addendum_factor)
+    # The pinion's WORKING flank is the part below the pitch circle (it is driven by
+    # the wheel tip). Above the pitch circle the tooth is a free rounded cap. Per
+    # Peterson's diagrams, the semicircular tip is centred ON the pitch circle, so
+    # the straight flanks run from the root up to the pitch radius and the cap
+    # (radius half_w) sits on top, reaching pitch_radius + half_w.
+    flank_top_x = geo.pitch_radius_pinion
 
     lower_root = (root_radius, -half_w)
     lower_flank_top = (flank_top_x, -half_w)
