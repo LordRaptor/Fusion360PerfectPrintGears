@@ -73,3 +73,29 @@ def test_line_intersection_crossing():
 
 def test_line_intersection_parallel_returns_none():
     assert gm.line_intersection((0, 0), (1, 0), (0, 1), (1, 1)) is None
+
+
+# tests/test_gear_math.py  (append)
+def test_wheel_tip_envelope_spans_pitch_to_centerline():
+    inp = _valid_inputs(wheel_teeth=50, pinion_teeth=10, module_mm=1.0,
+                        feature_width_mm=2.388, clearance_mm=0.0, resolution=40)
+    geo = gm.derive_geometry(inp)
+    pts = gm.wheel_tip_halfprofile(inp, geo)
+
+    assert len(pts) >= 5
+    radii = [math.hypot(x, y) for (x, y) in pts]
+
+    # The tip lives outside the pitch circle, below the addendum ceiling.
+    addendum_ceiling = geo.pitch_radius_wheel + 2.0 * inp.module_mm
+    for r in radii:
+        assert geo.pitch_radius_wheel - 1e-6 <= r <= addendum_ceiling + 1e-6
+
+    # Ordered from the pitch-circle end (near R_w) up to the apex (largest radius).
+    assert radii[0] == pytest.approx(geo.pitch_radius_wheel, abs=0.15)
+    assert radii == sorted(radii)  # monotonically increasing toward the apex
+
+    # All points sit on the +x side within a half-tooth angular wedge.
+    half_tooth_angle = math.pi / inp.wheel_teeth
+    for (x, y) in pts:
+        assert x > 0
+        assert 0 <= math.atan2(y, x) <= half_tooth_angle + 1e-6

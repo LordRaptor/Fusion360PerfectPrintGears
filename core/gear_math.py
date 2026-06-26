@@ -97,3 +97,66 @@ def line_intersection(p1: Point, p2: Point, p3: Point, p4: Point):
     px = (a * (x3 - x4) - (x1 - x2) * b) / den
     py = (a * (y3 - y4) - (y1 - y2) * b) / den
     return (px, py)
+
+
+def wheel_tip_halfprofile(inp: GearInputs, geo: DerivedGeometry,
+                          pinion_dir: int = 1, wheel_dir: int = 1) -> List[Point]:
+    """Half of the wheel tooth tip, generated as the conjugate envelope of the
+    moving pinion flank. Returns points ordered from the pitch-circle end to the
+    tooth-centerline apex, in wheel-centered coordinates (mm), on the +x side.
+
+    Method (Peterson, Clock Design Guidelines pp. 63-64):
+      * The pinion working flank is a straight line parallel to a pinion radial,
+        offset by half the feature width.
+      * Step the meshing motion: rotate that flank about the pinion centre by
+        k*delta, and simultaneously about the wheel centre by k*delta/ratio
+        (opposite sense). delta spans one pinion tooth pitch over `resolution` steps.
+      * The envelope tangent to that family of lines is the wheel tip; sample it
+        as the intersection of consecutive line snapshots.
+    """
+    op = (geo.center_distance, 0.0)            # pinion centre
+    ow = (0.0, 0.0)                            # wheel centre
+    half_w = inp.feature_width_mm / 2.0
+
+    # Reference upper flank: horizontal line at y=+half_w (parallel to the pinion
+    # radial that points toward the wheel), defined by two points spanning well
+    # past the pitch point so the family covers the whole tip.
+    reach = geo.center_distance + geo.pitch_radius_pinion
+    a_ref = (op[0], half_w)
+    b_ref = (op[0] - reach, half_w)
+
+    pitch_angle_pinion = 2.0 * math.pi / inp.pinion_teeth
+    k_steps = max(8, inp.resolution)
+    delta = pitch_angle_pinion / k_steps
+
+    lines = []
+    for k in range(k_steps + 1):
+        tp = pinion_dir * k * delta
+        tw = wheel_dir * k * delta / geo.ratio
+        a = rotate_point(rotate_point(a_ref, op, tp), ow, tw)
+        b = rotate_point(rotate_point(b_ref, op, tp), ow, tw)
+        lines.append((a, b))
+
+    half_tooth_angle = math.pi / inp.wheel_teeth
+    addendum_ceiling = geo.pitch_radius_wheel + 2.0 * inp.module_mm
+
+    raw = []
+    for k in range(len(lines) - 1):
+        e = line_intersection(lines[k][0], lines[k][1],
+                              lines[k + 1][0], lines[k + 1][1])
+        if e is None:
+            continue
+        x, y = e
+        r = math.hypot(x, y)
+        if x <= 0:
+            continue
+        ang = math.atan2(y, x)
+        if not (-1e-9 <= ang <= half_tooth_angle + 1e-9):
+            continue
+        if not (geo.pitch_radius_wheel - 1e-6 <= r <= addendum_ceiling + 1e-6):
+            continue
+        raw.append((max(ang, 0.0), (x, y), r))
+
+    # Order from the pitch-circle end (smallest radius) to the apex (largest radius).
+    raw.sort(key=lambda t: t[2])
+    return [p for (_a, p, _r) in raw]
