@@ -75,3 +75,25 @@ def validate_inputs(inp: GearInputs) -> None:
         raise ValueError("clearance must be >= 0")
     if inp.clearance_mm >= inp.feature_width_mm:
         raise ValueError("clearance must be less than the feature width")
+
+
+def rotate_point(p: Point, center: Point, angle: float) -> Point:
+    s, c = math.sin(angle), math.cos(angle)
+    dx, dy = p[0] - center[0], p[1] - center[1]
+    return (center[0] + c * dx - s * dy, center[1] + s * dx + c * dy)
+
+
+def line_intersection(p1: Point, p2: Point, p3: Point, p4: Point):
+    """Intersection of line(p1,p2) and line(p3,p4); None if (near) parallel."""
+    x1, y1 = p1
+    x2, y2 = p2
+    x3, y3 = p3
+    x4, y4 = p4
+    den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+    if abs(den) < 1e-12:
+        return None
+    a = x1 * y2 - y1 * x2
+    b = x3 * y4 - y3 * x4
+    px = (a * (x3 - x4) - (x1 - x2) * b) / den
+    py = (a * (y3 - y4) - (y1 - y2) * b) / den
+    return (px, py)

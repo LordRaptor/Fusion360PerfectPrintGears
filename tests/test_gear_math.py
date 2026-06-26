@@ -51,3 +51,25 @@ def test_validate_rejects_feature_width_causing_overlap():
 def test_validate_rejects_clearance_ge_feature_width():
     with pytest.raises(ValueError, match="clearance"):
         gm.validate_inputs(_valid_inputs(clearance_mm=2.388))
+
+
+# tests/test_gear_math.py  (append)
+def test_rotate_point_90_about_origin():
+    x, y = gm.rotate_point((1.0, 0.0), (0.0, 0.0), math.pi / 2)
+    assert x == pytest.approx(0.0, abs=1e-9)
+    assert y == pytest.approx(1.0, abs=1e-9)
+
+
+def test_rotate_point_about_offset_center():
+    x, y = gm.rotate_point((2.0, 1.0), (1.0, 1.0), math.pi)
+    assert x == pytest.approx(0.0, abs=1e-9)
+    assert y == pytest.approx(1.0, abs=1e-9)
+
+
+def test_line_intersection_crossing():
+    p = gm.line_intersection((0, 0), (2, 2), (0, 2), (2, 0))
+    assert p == pytest.approx((1.0, 1.0))
+
+
+def test_line_intersection_parallel_returns_none():
+    assert gm.line_intersection((0, 0), (1, 0), (0, 1), (1, 1)) is None
