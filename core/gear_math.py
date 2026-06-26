@@ -160,3 +160,51 @@ def wheel_tip_halfprofile(inp: GearInputs, geo: DerivedGeometry,
     # Order from the pitch-circle end (smallest radius) to the apex (largest radius).
     raw.sort(key=lambda t: t[2])
     return [p for (_a, p, _r) in raw]
+
+
+@dataclass
+class Segment:
+    kind: str               # 'line' | 'spline' | 'arc3' (arc3 = [start, mid, end])
+    points: List[Point]
+
+
+def _polar(r: float, ang: float) -> Point:
+    return (r * math.cos(ang), r * math.sin(ang))
+
+
+def build_wheel_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
+    """One wheel tooth centered on the +x axis, as a connected list of Segments,
+    ordered counter-clockwise: lower root -> lower flank -> tip (2 splines) ->
+    upper flank -> upper root. Clearance narrows the tooth (both flanks pulled in).
+    """
+    tip = wheel_tip_halfprofile(inp, geo)            # pitch-end -> apex, upper (+y) side
+    if not tip:
+        raise ValueError("could not generate wheel tip envelope")
+
+    # Pull the tip in by the clearance to leave running play (narrow the wheel tooth).
+    clr = inp.clearance_mm
+    upper_tip = []                                    # ordered pitch-end -> apex
+    for (x, y) in tip:
+        ang = math.atan2(y, x)
+        r = math.hypot(x, y)
+        ang_in = ang - (clr / 2.0) / r               # rotate toward centerline by clearance
+        upper_tip.append(_polar(r, ang_in))
+    apex = (upper_tip[-1][0], 0.0)                    # force apex onto the centerline
+    lower_tip = [(x, -y) for (x, y) in upper_tip]     # mirror across the x-axis (pitch-end -> apex)
+
+    # Flanks: straight radial walls from the root up to the pitch-circle end of the
+    # tip, at the same angle as the tip's pitch-end point.
+    root_radius = geo.pitch_radius_wheel - (inp.module_mm * 1.25 * inp.dedendum_factor)
+    up_ang = math.atan2(upper_tip[0][1], upper_tip[0][0])
+    lo_ang = math.atan2(lower_tip[0][1], lower_tip[0][0])
+    upper_root_pt = _polar(root_radius, up_ang)
+    lower_root_pt = _polar(root_radius, lo_ang)
+
+    # Connected counter-clockwise path:
+    #   lower flank -> lower tip (pitch-end..apex) -> upper tip (apex..pitch-end) -> upper flank
+    segs: List[Segment] = []
+    segs.append(Segment('line', [lower_root_pt, lower_tip[0]]))            # lower flank
+    segs.append(Segment('spline', lower_tip + [apex]))                    # lower tip -> apex
+    segs.append(Segment('spline', [apex] + list(reversed(upper_tip))))    # apex -> upper pitch-end
+    segs.append(Segment('line', [upper_tip[0], upper_root_pt]))           # upper flank
+    return segs

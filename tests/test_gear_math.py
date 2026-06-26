@@ -99,3 +99,22 @@ def test_wheel_tip_envelope_spans_pitch_to_centerline():
     for (x, y) in pts:
         assert x > 0
         assert 0 <= math.atan2(y, x) <= half_tooth_angle + 1e-6
+
+
+# tests/test_gear_math.py  (append)
+def test_wheel_tooth_segments_are_connected_and_typed():
+    inp = _valid_inputs(module_mm=1.0, feature_width_mm=2.388, clearance_mm=0.1,
+                        resolution=40)
+    geo = gm.derive_geometry(inp)
+    segs = gm.build_wheel_tooth(inp, geo)
+
+    kinds = [s.kind for s in segs]
+    assert kinds.count('spline') == 2          # mirrored tip halves
+    assert 'line' in kinds                       # flanks + root
+    # Consecutive segments share endpoints (a continuous path).
+    for cur, nxt in zip(segs, segs[1:]):
+        assert cur.points[-1][0] == pytest.approx(nxt.points[0][0], abs=1e-6)
+        assert cur.points[-1][1] == pytest.approx(nxt.points[0][1], abs=1e-6)
+    # The apex of the tip sits on the tooth centerline (x-axis).
+    apex = segs[1].points[-1]
+    assert apex[1] == pytest.approx(0.0, abs=1e-6)
