@@ -156,8 +156,8 @@ def test_build_gear_pair_places_centers_for_meshing():
     assert pair.wheel.center == pytest.approx((0.0, 0.0))
     assert pair.pinion.center == pytest.approx((30.0, 0.0))
     assert pair.wheel.teeth == 50 and pair.pinion.teeth == 10
-    assert len(pair.wheel.segments) == 50 * 4      # 4 segments per wheel tooth
-    assert len(pair.pinion.segments) == 10 * 3     # 3 segments per pinion tooth
+    assert len(pair.wheel.segments) == 50 * 5      # 4 tooth segments + 1 root bridge
+    assert len(pair.pinion.segments) == 10 * 4     # 3 tooth segments + 1 root bridge
     assert pair.wheel.pitch_radius == pytest.approx(25.0)
     assert pair.pinion.pitch_radius == pytest.approx(5.0)
 
@@ -193,6 +193,20 @@ def test_other_ratio_60_8_builds():
     inp = _valid_inputs(wheel_teeth=60, pinion_teeth=8, module_mm=0.8,
                         feature_width_mm=1.6, clearance_mm=0.08, resolution=48)
     pair = gm.build_gear_pair(inp)
-    assert len(pair.wheel.segments) == 60 * 4
-    assert len(pair.pinion.segments) == 8 * 3
+    assert len(pair.wheel.segments) == 60 * 5
+    assert len(pair.pinion.segments) == 8 * 4
     assert pair.center_distance == pytest.approx(0.8 * (60 + 8) / 2)
+
+
+def test_gear_outlines_form_single_closed_loop():
+    # Each gear's segments must form one continuous closed loop: every segment's
+    # end point meets the next segment's start, including last -> first wrap-around.
+    # Without root-bridge arcs the teeth would be disconnected and unextrudable.
+    inp = _valid_inputs(resolution=40)
+    pair = gm.build_gear_pair(inp)
+    for prof in (pair.wheel, pair.pinion):
+        segs = prof.segments
+        assert len(segs) >= prof.teeth
+        for cur, nxt in zip(segs, segs[1:] + segs[:1]):
+            assert cur.points[-1][0] == pytest.approx(nxt.points[0][0], abs=1e-6)
+            assert cur.points[-1][1] == pytest.approx(nxt.points[0][1], abs=1e-6)

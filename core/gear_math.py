@@ -268,6 +268,30 @@ def array_tooth(tooth: List[Segment], teeth: int, base_angle: float) -> List[Seg
     return out
 
 
+def close_gear_loop(tooth: List[Segment], teeth: int, base_angle: float) -> List[Segment]:
+    """Array one tooth `teeth` times and bridge the gaps between adjacent teeth
+    with arcs along the root circle, producing a single closed outline. Each
+    tooth path runs root -> flank -> tip -> flank -> root; the bridge arc joins
+    one tooth's last point to the next tooth's first point. The arc is placed at
+    the radius of those root points, so it follows the root circle."""
+    spt = len(tooth)
+    arrayed = array_tooth(tooth, teeth, base_angle)
+    out: List[Segment] = []
+    for k in range(teeth):
+        this_tooth = arrayed[k * spt:(k + 1) * spt]
+        out.extend(this_tooth)
+        end_pt = this_tooth[-1].points[-1]
+        start_next = arrayed[((k + 1) % teeth) * spt].points[0]
+        a0 = math.atan2(end_pt[1], end_pt[0])
+        a1 = math.atan2(start_next[1], start_next[0])
+        while a1 <= a0:
+            a1 += 2.0 * math.pi
+        mid = (a0 + a1) / 2.0
+        rho = math.hypot(end_pt[0], end_pt[1])
+        out.append(Segment('arc3', [end_pt, _polar(rho, mid), start_next]))
+    return out
+
+
 def _radii(segments: List[Segment]) -> Tuple[float, float]:
     rr = [math.hypot(x, y) for s in segments for (x, y) in s.points]
     return (min(rr), max(rr))
@@ -280,9 +304,9 @@ def build_gear_pair(inp: GearInputs) -> GearPair:
     wheel_tooth = build_wheel_tooth(inp, geo)
     pinion_tooth = build_pinion_tooth(inp, geo)
 
-    wheel_segs = array_tooth(wheel_tooth, inp.wheel_teeth, base_angle=0.0)
+    wheel_segs = close_gear_loop(wheel_tooth, inp.wheel_teeth, base_angle=0.0)
     # Pinion tooth points toward the wheel (-x from the pinion centre) to mesh.
-    pinion_segs = array_tooth(pinion_tooth, inp.pinion_teeth, base_angle=math.pi)
+    pinion_segs = close_gear_loop(pinion_tooth, inp.pinion_teeth, base_angle=math.pi)
 
     w_root, w_add = _radii(wheel_segs)
     p_root, p_add = _radii(pinion_segs)
