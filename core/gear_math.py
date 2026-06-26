@@ -234,3 +234,61 @@ def build_pinion_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
     segs.append(Segment('arc3', [lower_flank_top, tip_mid, upper_flank_top]))  # rounded tip
     segs.append(Segment('line', [upper_flank_top, upper_root]))             # upper flank
     return segs
+
+
+@dataclass
+class GearProfile:
+    role: str                       # 'wheel' | 'pinion'
+    teeth: int
+    center: Point                   # placement in the component frame (mm)
+    pitch_radius: float
+    root_radius: float
+    addendum_radius: float
+    segments: List[Segment]         # all teeth, gear-local coords (centered at origin), mm
+
+
+@dataclass
+class GearPair:
+    wheel: GearProfile
+    pinion: GearProfile
+    center_distance: float
+    circular_pitch: float
+
+
+def array_tooth(tooth: List[Segment], teeth: int, base_angle: float) -> List[Segment]:
+    """Replicate one tooth `teeth` times around the origin, each rotated by the
+    tooth pitch, starting from `base_angle`."""
+    pitch = 2.0 * math.pi / teeth
+    out: List[Segment] = []
+    for k in range(teeth):
+        ang = base_angle + k * pitch
+        for seg in tooth:
+            out.append(Segment(seg.kind,
+                               [rotate_point(p, (0.0, 0.0), ang) for p in seg.points]))
+    return out
+
+
+def _radii(segments: List[Segment]) -> Tuple[float, float]:
+    rr = [math.hypot(x, y) for s in segments for (x, y) in s.points]
+    return (min(rr), max(rr))
+
+
+def build_gear_pair(inp: GearInputs) -> GearPair:
+    validate_inputs(inp)
+    geo = derive_geometry(inp)
+
+    wheel_tooth = build_wheel_tooth(inp, geo)
+    pinion_tooth = build_pinion_tooth(inp, geo)
+
+    wheel_segs = array_tooth(wheel_tooth, inp.wheel_teeth, base_angle=0.0)
+    # Pinion tooth points toward the wheel (-x from the pinion centre) to mesh.
+    pinion_segs = array_tooth(pinion_tooth, inp.pinion_teeth, base_angle=math.pi)
+
+    w_root, w_add = _radii(wheel_segs)
+    p_root, p_add = _radii(pinion_segs)
+
+    wheel = GearProfile('wheel', inp.wheel_teeth, (0.0, 0.0),
+                        geo.pitch_radius_wheel, w_root, w_add, wheel_segs)
+    pinion = GearProfile('pinion', inp.pinion_teeth, (geo.center_distance, 0.0),
+                         geo.pitch_radius_pinion, p_root, p_add, pinion_segs)
+    return GearPair(wheel, pinion, geo.center_distance, geo.circular_pitch)

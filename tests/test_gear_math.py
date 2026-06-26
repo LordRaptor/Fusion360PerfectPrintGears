@@ -136,3 +136,27 @@ def test_pinion_tooth_has_arc_tip_and_constant_width_flanks():
     flanks = [s for s in segs if s.kind == 'line']
     ys = [pt[1] for s in flanks for pt in s.points]
     assert max(ys) - min(ys) == pytest.approx(inp.feature_width_mm, abs=1e-6)
+
+
+# tests/test_gear_math.py  (append)
+def test_array_tooth_produces_n_copies():
+    seg = gm.Segment('line', [(10.0, 0.0), (12.0, 0.0)])
+    out = gm.array_tooth([seg], teeth=4, base_angle=0.0)
+    assert len(out) == 4
+    # second copy rotated by 90 degrees: (10,0) -> (0,10)
+    p = out[1].points[0]
+    assert p == pytest.approx((0.0, 10.0), abs=1e-6)
+
+
+def test_build_gear_pair_places_centers_for_meshing():
+    inp = _valid_inputs(wheel_teeth=50, pinion_teeth=10, module_mm=1.0,
+                        feature_width_mm=2.388, clearance_mm=0.1, resolution=40)
+    pair = gm.build_gear_pair(inp)
+    assert pair.center_distance == pytest.approx(30.0)
+    assert pair.wheel.center == pytest.approx((0.0, 0.0))
+    assert pair.pinion.center == pytest.approx((30.0, 0.0))
+    assert pair.wheel.teeth == 50 and pair.pinion.teeth == 10
+    assert len(pair.wheel.segments) == 50 * 4      # 4 segments per wheel tooth
+    assert len(pair.pinion.segments) == 10 * 3     # 3 segments per pinion tooth
+    assert pair.wheel.pitch_radius == pytest.approx(25.0)
+    assert pair.pinion.pitch_radius == pytest.approx(5.0)
