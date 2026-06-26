@@ -160,3 +160,39 @@ def test_build_gear_pair_places_centers_for_meshing():
     assert len(pair.pinion.segments) == 10 * 3     # 3 segments per pinion tooth
     assert pair.wheel.pitch_radius == pytest.approx(25.0)
     assert pair.pinion.pitch_radius == pytest.approx(5.0)
+
+
+# tests/test_gear_math.py  (append)
+def test_peterson_50_10_example_is_sane():
+    # 50T wheel, 10T pinion, 5:1 (the worked example in the document).
+    inp = _valid_inputs(wheel_teeth=50, pinion_teeth=10, module_mm=1.0,
+                        feature_width_mm=2.388, clearance_mm=0.1, resolution=48)
+    pair = gm.build_gear_pair(inp)
+
+    # Pitch circles are tangent at the line of centers.
+    assert pair.wheel.pitch_radius + pair.pinion.pitch_radius == \
+        pytest.approx(pair.center_distance)
+
+    # Wheel tip rises above its pitch circle (real addendum) but stays sane.
+    assert pair.wheel.addendum_radius > pair.wheel.pitch_radius
+    assert pair.wheel.addendum_radius < pair.wheel.pitch_radius + 2.0 * inp.module_mm
+
+    # Roots are inside the pitch circles.
+    assert pair.wheel.root_radius < pair.wheel.pitch_radius
+    assert pair.pinion.root_radius < pair.pinion.pitch_radius
+
+    # Every wheel segment is finite and on the gear (no NaNs / runaway points).
+    for s in pair.wheel.segments:
+        for (x, y) in s.points:
+            assert math.isfinite(x) and math.isfinite(y)
+            assert math.hypot(x, y) <= pair.wheel.addendum_radius + 1e-6
+
+
+# tests/test_gear_math.py  (append)
+def test_other_ratio_60_8_builds():
+    inp = _valid_inputs(wheel_teeth=60, pinion_teeth=8, module_mm=0.8,
+                        feature_width_mm=1.6, clearance_mm=0.08, resolution=48)
+    pair = gm.build_gear_pair(inp)
+    assert len(pair.wheel.segments) == 60 * 4
+    assert len(pair.pinion.segments) == 8 * 3
+    assert pair.center_distance == pytest.approx(0.8 * (60 + 8) / 2)
