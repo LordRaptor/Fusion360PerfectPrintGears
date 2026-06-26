@@ -208,3 +208,29 @@ def build_wheel_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
     segs.append(Segment('spline', [apex] + list(reversed(upper_tip))))    # apex -> upper pitch-end
     segs.append(Segment('line', [upper_tip[0], upper_root_pt]))           # upper flank
     return segs
+
+
+def build_pinion_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
+    """One pinion tooth centered on the +x axis: two parallel straight flanks a
+    feature-width apart, capped by a semicircular tip, with root feet. Returned
+    as a connected counter-clockwise path. The tip is free (never contacts the
+    wheel); only the flanks are working surfaces.
+    """
+    half_w = inp.feature_width_mm / 2.0
+    root_radius = geo.pitch_radius_pinion - (inp.module_mm * 1.25 * inp.dedendum_factor)
+    # Pinion addendum: flanks extend a little past the pitch circle, then a
+    # semicircular cap of radius half_w. Tip apex height chosen so the cap is a
+    # clean semicircle just beyond the pitch radius.
+    flank_top_x = geo.pitch_radius_pinion + (inp.module_mm * inp.addendum_factor)
+
+    lower_root = (root_radius, -half_w)
+    lower_flank_top = (flank_top_x, -half_w)
+    upper_flank_top = (flank_top_x, half_w)
+    upper_root = (root_radius, half_w)
+    tip_mid = (flank_top_x + half_w, 0.0)            # outermost point of the cap
+
+    segs: List[Segment] = []
+    segs.append(Segment('line', [lower_root, lower_flank_top]))             # lower flank
+    segs.append(Segment('arc3', [lower_flank_top, tip_mid, upper_flank_top]))  # rounded tip
+    segs.append(Segment('line', [upper_flank_top, upper_root]))             # upper flank
+    return segs

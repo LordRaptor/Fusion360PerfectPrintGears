@@ -118,3 +118,21 @@ def test_wheel_tooth_segments_are_connected_and_typed():
     # The apex of the tip sits on the tooth centerline (x-axis).
     apex = segs[1].points[-1]
     assert apex[1] == pytest.approx(0.0, abs=1e-6)
+
+
+# tests/test_gear_math.py  (append)
+def test_pinion_tooth_has_arc_tip_and_constant_width_flanks():
+    inp = _valid_inputs(module_mm=1.0, feature_width_mm=2.388, clearance_mm=0.1)
+    geo = gm.derive_geometry(inp)
+    segs = gm.build_pinion_tooth(inp, geo)
+
+    kinds = [s.kind for s in segs]
+    assert kinds.count('arc3') == 1            # one rounded (semicircular) tip
+    assert kinds.count('line') >= 2            # two parallel flanks
+
+    # The two flanks are separated by the feature width (constant-width tooth),
+    # measured perpendicular to the radial. The pinion tooth is centered on the
+    # +x axis here (it is repositioned to point at the wheel during arraying).
+    flanks = [s for s in segs if s.kind == 'line']
+    ys = [pt[1] for s in flanks for pt in s.points]
+    assert max(ys) - min(ys) == pytest.approx(inp.feature_width_mm, abs=1e-6)
