@@ -23,7 +23,7 @@ def test_from_json_fills_missing_keys():
 
 def test_defaults_use_tooth_fraction_not_feature_width():
     d = settings.defaults()
-    assert d["tooth_fraction"] == 0.5
+    assert d["tooth_fraction"] == 0.45
     assert d["module_mm"] == 1.5
     assert d["resolution"] == 4
     # feature width is derived, never stored

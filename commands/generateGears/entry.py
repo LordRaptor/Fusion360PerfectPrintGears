@@ -81,6 +81,11 @@ def _build_inputs(inputs):
     inputs.addIntegerSpinnerCommandInput('wheelTeeth', 'Wheel teeth', 6, 2000, 1, int(s['wheel_teeth']))
     inputs.addIntegerSpinnerCommandInput('pinionTeeth', 'Pinion teeth', 6, 2000, 1, int(s['pinion_teeth']))
 
+    futil.log('build: ratioInfo')
+    # Read-only readout of the reduction ratio implied by the tooth counts.
+    rinfo = inputs.addTextBoxCommandInput('ratioInfo', 'Gear ratio', '', 1, True)
+    rinfo.isFullWidth = False
+
     futil.log('build: module')
     inputs.addValueInput('module', 'Module (mm)', 'mm',
                          adsk.core.ValueInput.createByReal(s['module_mm'] * 0.1))
@@ -90,10 +95,9 @@ def _build_inputs(inputs):
                          adsk.core.ValueInput.createByReal(s['tooth_fraction']))
 
     futil.log('build: featureWidthInfo')
-    # Feature width is DERIVED -> a disabled value field (info only), not editable.
-    fwi = inputs.addValueInput('featureWidthInfo', 'Feature width (mm)', 'mm',
-                               adsk.core.ValueInput.createByReal(0.0))
-    fwi.isEnabled = False
+    # Feature width is DERIVED -> a read-only text box (info only), not editable.
+    fwi = inputs.addTextBoxCommandInput('featureWidthInfo', 'Tooth width', '', 1, True)
+    fwi.isFullWidth = False
 
     futil.log('build: clearance')
     # Text-list dropdown (a button row would require a per-item icon resource).
@@ -128,16 +132,27 @@ def _build_inputs(inputs):
 
     futil.log('build: update feature width display')
     _update_feature_width_display(inputs)
+    _update_ratio_display(inputs)
     futil.log('build: inputs done')
 
 
 def _update_feature_width_display(inputs):
-    """Recompute the derived feature width into the disabled value field (mm->cm)."""
+    """Recompute the derived feature width into the read-only text box (mm)."""
     try:
         module_mm = inputs.itemById('module').value / 0.1
         tf = inputs.itemById('toothFraction').value
         fw = tf * math.pi * module_mm
-        inputs.itemById('featureWidthInfo').value = fw * 0.1
+        inputs.itemById('featureWidthInfo').text = f'{fw:.3f} mm'
+    except Exception:
+        pass
+
+
+def _update_ratio_display(inputs):
+    """Recompute the reduction-ratio readout from the current tooth counts."""
+    try:
+        wt = inputs.itemById('wheelTeeth').value
+        pt = inputs.itemById('pinionTeeth').value
+        inputs.itemById('ratioInfo').text = gear_math.format_ratio(wt, pt)
     except Exception:
         pass
 
@@ -147,6 +162,8 @@ def command_input_changed(args: adsk.core.InputChangedEventArgs):
     changed = args.input
     if changed.id in ('module', 'toothFraction'):
         _update_feature_width_display(inputs)
+    elif changed.id in ('wheelTeeth', 'pinionTeeth'):
+        _update_ratio_display(inputs)
     elif changed.id == 'clearanceMode':
         is_pct = inputs.itemById('clearanceMode').selectedItem.name == 'Percent'
         inputs.itemById('clearance').isVisible = not is_pct

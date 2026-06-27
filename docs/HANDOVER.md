@@ -4,7 +4,13 @@
 **Status:** **v1 complete and validated** — merged to `main` via **PR #1**
 (https://github.com/LordRaptor/Fusion360PerfectPrintGears/pull/1).
 The hard problem (the conjugate wheel-tip geometry) is **solved**; the add-in generates solid
-gears with **fully parametric, fully constrained** sketches. 35 pytest tests pass.
+gears with **fully parametric, fully constrained** sketches. 38 pytest tests pass.
+
+**Post-v1 refinements (this session):** the dialog now shows a live **gear-ratio readout**
+(decimal + GCD-reduced integer, e.g. `3.33 : 1 (10 : 3)`) and a read-only **Tooth width** field
+(renamed from "Feature width"). The default `tooth_fraction` is now **0.45** (was 0.5) for
+meshing backlash. Two sketch-constraint over/degenerate-constraint errors were cleared — see the
+notes in §3 (wheel tip apex) and §5 (pinion cap). Both gears build with a **clean log**.
 
 > This supersedes the older handover (which described the geometry as unsolved). That saga is
 > over — see §3.
@@ -42,7 +48,7 @@ layer converts mm→cm (`MM_TO_CM = 0.1`).
 | `tests/test_gear_math.py`, `tests/test_settings.py`, `tests/test_interference.py` | pytest (engine + settings + conjugacy/interference guard). |
 | `PerfectPrintGears.py` | `run`/`stop`; shows a load message box (with the log path). |
 
-**Run tests:** `.venv/Scripts/python.exe -m pytest tests/ -q` → **35 passed**. The Fusion
+**Run tests:** `.venv/Scripts/python.exe -m pytest tests/ -q` → **38 passed**. The Fusion
 layer can only be `py_compile`d here; final verification is manual in Fusion (user's job).
 
 **Logs (for debugging the add-in in Fusion):**
@@ -64,10 +70,12 @@ interference test (this consistency is what fixed the long-running failure):
 - Tip trimmed from the flank join to the centerline apex; mirrored; emitted as a **fitted
   spline of ~4 fit points/half** (the `resolution` input). Apex is a **sharp point** (printer
   smooths it).
-- **Feature width is derived from the module:** `w = TOOTH_FRACTION · π·module`. There are
+- **Tooth width is derived from the module:** `w = TOOTH_FRACTION · π·module`. There are
   **no user parameters** for regeneration — Peterson's tip can't be regenerated parametrically;
-  changing any input requires re-running the add-in. `TOOTH_FRACTION` (default 0.5) is the
-  circumferential-backlash knob; `clearance` is radial tip/root play.
+  changing any input requires re-running the add-in. `TOOTH_FRACTION` (**default 0.45**) is the
+  circumferential-backlash knob (0.5 = zero play; 0.45 ≈ 10% play); `clearance` is radial
+  tip/root play. (The dialog field is now labelled **Tooth width**, shown read-only; the engine
+  identifier is still `feature_width_mm`.)
 
 **Validation:** `tests/test_interference.py` rolls closed gear polygons through a full mesh
 cycle (point-in-poly + penetration depth, geometry-derived mesh zone) — ~0 µm at realistic
@@ -127,7 +135,10 @@ mode — see §7). Every constraint/dimension call is wrapped in try/except + lo
   about centerline; **equal** length (symmetry doesn't equalise length); **width** offset dim;
   **length** dim on f1.
 - Tip: lower spline apex coincident to centerline end; **`isFixed`** on the lower spline (the
-  conjugate shape can't be dimensioned); upper spline mirrored **per fit point** via symmetry.
+  conjugate shape can't be dimensioned); upper spline mirrored **per fit point** via symmetry —
+  **except the apex fit point**, which lies on the centerline (its mirror is itself, so the
+  symmetry there is degenerate and threw `VCS_SKETCH_SOLVING_FAILED`); it is skipped and the
+  apex stays pinned by the centerline-end coincidence + the closed tooth loop.
 
 **Pinion** (located by the mesh):
 - 3 circles concentric (root/add centres coincident to pitch centre); diameter dims.
@@ -137,8 +148,9 @@ mode — see §7). Every constraint/dimension call is wrapped in try/except + lo
   line of centers.
 - Flanks: bases on root; f1 parallel to centerline; f2 symmetric; width offset dim; flank
   **tops coincident to the pitch circle** (instead of a length dim — pinion flanks end there).
-- Cap: arc endpoints **coincident with the flank tops**, then arc **tangent to both flanks**
-  (with the width dim, this fixes the cap radius — no radius dim).
+- Cap: arc endpoints **coincident with the flank tops**, then arc **tangent to ONE flank**.
+  Both endpoints are pinned and the flanks are parallel, so a single tangent fixes the cap
+  radius — a second tangent over-constrains (`VCS_SKETCH_OVER_CONSTRAINTS`), so only one is added.
 
 ---
 
