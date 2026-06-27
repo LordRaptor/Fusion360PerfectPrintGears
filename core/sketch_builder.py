@@ -61,71 +61,83 @@ def _add_circle_diameters(sketch, cx_cm, cy_cm, items):
             futil.handle_error('addDiameterDimension')
 
 
-def _constrain_flanks(sketch, flank_lines, root_circle, gcx_cm, gcy_cm, wheel,
-                      centerline=None):
-    """Constrain the tooth flank lines.
+def _constrain_flanks(sketch, flank_lines, root_circle, gcx_cm, gcy_cm,
+                      centerline=None, pitch_circle=None):
+    """Constrain the two tooth flank lines, symmetric about the centerline.
 
-    Pinion (or no centerline): pin each flank's base (the end nearest the root)
-    coincident with the root circle.
+    Common to both gears: both flank bases (the ends nearest the root) coincident
+    with the root circle; f1 parallel to the centerline; f2 symmetric to f1 about
+    the centerline; a width offset dimension between the flanks.
 
-    Wheel: both flank bases coincident with the root circle; f1 parallel to the
-    centerline; f2 SYMMETRIC to f1 about the centerline (mirrors orientation and
-    offset, but NOT length, so an EQUAL constraint is also needed); a width offset
-    dimension between the flanks; and a length dimension on f1. Defensive per
-    constraint."""
+    Length is fixed differently per gear:
+      - pinion (pitch_circle given): the flank TOPS are coincident with the pitch
+        circle (the pinion flanks end on the pitch circle) -- no length dimension.
+      - wheel (pitch_circle None): a length dimension on f1 plus an EQUAL
+        constraint on f2 (its top is at the spline join, not on a clean circle;
+        and symmetry does not equalise length).
+
+    No centerline / <2 flanks: just pin each base to the root circle."""
     gc = sketch.geometricConstraints
     dims = sketch.sketchDimensions
 
-    def foot_point(line):
+    def ends(line):
         sp, ep = line.startSketchPoint, line.endSketchPoint
         ds = math.hypot(sp.geometry.x - gcx_cm, sp.geometry.y - gcy_cm)
         de = math.hypot(ep.geometry.x - gcx_cm, ep.geometry.y - gcy_cm)
-        return sp if ds < de else ep
+        return (sp, ep) if ds < de else (ep, sp)        # (foot, top)
 
-    if not wheel or centerline is None or len(flank_lines) < 2:
+    if centerline is None or len(flank_lines) < 2:
         for line in flank_lines:
             try:
-                gc.addCoincident(foot_point(line), root_circle)
+                gc.addCoincident(ends(line)[0], root_circle)
             except Exception:
                 futil.handle_error('flank base coincident with root circle')
         return
 
     f1, f2 = flank_lines[0], flank_lines[1]
-    for f in (f1, f2):
+    foot1, top1 = ends(f1)
+    foot2, top2 = ends(f2)
+    for foot in (foot1, foot2):
         try:
-            gc.addCoincident(foot_point(f), root_circle)
+            gc.addCoincident(foot, root_circle)
         except Exception:
             futil.handle_error('flank base coincident with root circle')
     try:
         gc.addParallel(f1, centerline)
     except Exception:
         futil.handle_error('flank parallel to centerline')
-    # f2 mirrors f1 about the centerline (orientation + offset)...
     try:
         gc.addSymmetry(f1, f2, centerline)
     except Exception:
         futil.handle_error('flank symmetry about centerline')
-    # ...but symmetry does NOT equalise segment length, so add equal too.
-    try:
-        gc.addEqual(f1, f2)
-    except Exception:
-        futil.handle_error('flank equal length')
-    # Width: perpendicular distance between the two flanks.
     try:
         s1, s2 = f1.startSketchPoint.geometry, f2.startSketchPoint.geometry
         wtp = adsk.core.Point3D.create((s1.x + s2.x) / 2.0, (s1.y + s2.y) / 2.0, 0.0)
         dims.addOffsetDimension(f1, f2, wtp, True)
     except Exception:
         futil.handle_error('flank width offset dimension')
-    # Length: dimension one flank (symmetry gives the other).
-    try:
-        sp, ep = f1.startSketchPoint, f1.endSketchPoint
-        ltp = adsk.core.Point3D.create((sp.geometry.x + ep.geometry.x) / 2.0,
-                                       (sp.geometry.y + ep.geometry.y) / 2.0 - 0.3, 0.0)
-        dims.addDistanceDimension(
-            sp, ep, adsk.fusion.DimensionOrientations.AlignedDimensionOrientation, ltp, True)
-    except Exception:
-        futil.handle_error('flank length dimension')
+
+    if pitch_circle is not None:
+        # pinion: flank tops on the pitch circle fix the length (no length dim).
+        for top in (top1, top2):
+            try:
+                gc.addCoincident(top, pitch_circle)
+            except Exception:
+                futil.handle_error('flank top coincident with pitch circle')
+    else:
+        # wheel: length dimension on f1 + equal on f2.
+        try:
+            ltp = adsk.core.Point3D.create((foot1.geometry.x + top1.geometry.x) / 2.0,
+                                           (foot1.geometry.y + top1.geometry.y) / 2.0 - 0.3, 0.0)
+            dims.addDistanceDimension(
+                foot1, top1, adsk.fusion.DimensionOrientations.AlignedDimensionOrientation,
+                ltp, True)
+        except Exception:
+            futil.handle_error('flank length dimension')
+        try:
+            gc.addEqual(f1, f2)
+        except Exception:
+            futil.handle_error('flank equal length')
 
 
 def _nearest_profile(profiles, cx_cm, cy_cm):
@@ -226,42 +238,45 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
         except Exception:
             futil.handle_error('mesh tangent to wheel pitch circle')
 
-    # Constraints step 3: tooth flanks. For the wheel, build a centerline
-    # construction line (centre -> tooth tip) that is horizontal, and make the
-    # flanks parallel to it -- so a future "rotate the arrangement" option only
-    # needs to replace the centerline's horizontal constraint.
+    # Constraints step 3: a construction CENTERLINE (gear centre -> tooth tip) for
+    # both gears; flanks are symmetric about it. The wheel's is horizontal (pins
+    # the tooth orientation); the pinion's angle (phase) is left free for now.
     flank_lines = [e for (s, e) in drawn if s.kind == 'line']
-    centerline = None
-    if lock_center:
-        ax = profile.base_angle
-        apex_mm = (cx + profile.addendum_radius * math.cos(ax),
-                   cy + profile.addendum_radius * math.sin(ax))
-        centerline = sketch.sketchCurves.sketchLines.addByTwoPoints(_pt(cx, cy), _pt(*apex_mm))
-        centerline.isConstruction = True
-        try:
+    ax = profile.base_angle
+    apex_mm = (cx + profile.addendum_radius * math.cos(ax),
+               cy + profile.addendum_radius * math.sin(ax))
+    centerline = sketch.sketchCurves.sketchLines.addByTwoPoints(_pt(cx, cy), _pt(*apex_mm))
+    centerline.isConstruction = True
+    try:
+        if lock_center:
             gc.addCoincident(centerline.startSketchPoint, sketch.originPoint)
-        except Exception:
-            futil.handle_error('centerline start coincident with origin')
+        else:
+            gc.addCoincident(centerline.startSketchPoint, pitch_circle.centerSketchPoint)
+    except Exception:
+        futil.handle_error('centerline start coincident with gear centre')
+    try:
+        gc.addCoincident(centerline.endSketchPoint, add_circle)
+    except Exception:
+        futil.handle_error('centerline end coincident with addendum circle')
+    if lock_center:
         try:
             gc.addHorizontal(centerline)
         except Exception:
             futil.handle_error('centerline horizontal')
-    _constrain_flanks(sketch, flank_lines, root_circle, cx * MM_TO_CM, cy * MM_TO_CM,
-                      wheel=lock_center, centerline=centerline)
 
-    # Constraints step 4 (wheel tip): the apex sits on the centerline end and on the
-    # addendum circle; the lower tip spline's shape can't be dimensioned so fix it,
-    # then mirror it to the upper tip via symmetry about the centerline.
-    if lock_center and centerline is not None:
+    _constrain_flanks(sketch, flank_lines, root_circle, cx * MM_TO_CM, cy * MM_TO_CM,
+                      centerline=centerline,
+                      pitch_circle=(None if lock_center else pitch_circle))
+
+    if lock_center:
+        # Wheel tip: apex on the centerline end; fix the lower tip spline (its
+        # conjugate shape can't be dimensioned); mirror it to the upper per fit
+        # point (curve-level symmetry is a no-op for splines).
         lower_spline = next((e for (s, e) in drawn
                              if s.kind == 'spline' and s.clamp_start), None)
         upper_spline = next((e for (s, e) in drawn
                              if s.kind == 'spline' and s.clamp_end), None)
         if lower_spline is not None:
-            try:
-                gc.addCoincident(centerline.endSketchPoint, add_circle)
-            except Exception:
-                futil.handle_error('centerline end coincident with addendum circle')
             try:
                 gc.addCoincident(lower_spline.endSketchPoint, centerline.endSketchPoint)
             except Exception:
@@ -271,10 +286,6 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
             except Exception:
                 futil.handle_error('fix lower tip spline')
             if upper_spline is not None:
-                # A curve-level symmetry is a no-op for splines; Fusion mirrors a
-                # spline by symmetry-constraining each fit point. Pair lower fit
-                # points to their mirror (across the horizontal centerline: y->-y)
-                # on the upper spline.
                 try:
                     lf, uf = lower_spline.fitPoints, upper_spline.fitPoints
                     futil.log(f'build_gear {name}: tip fit points lower={lf.count} upper={uf.count}')
@@ -294,6 +305,38 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
                                 futil.handle_error(f'tip fit-point symmetry {i}')
                 except Exception:
                     futil.handle_error('mirror tip spline fit points')
+    else:
+        # Pinion cap: coincident the arc endpoints with the flank tops, then make
+        # the arc tangent to both flanks. With the width offset dimension this
+        # fixes the cap radius (no radius dimension needed).
+        cap = next((e for (s, e) in drawn if s.kind == 'arc3'), None)
+        if cap is not None and len(flank_lines) >= 2:
+            gcx, gcy = cx * MM_TO_CM, cy * MM_TO_CM
+
+            def _flank_top(line):
+                sp, ep = line.startSketchPoint, line.endSketchPoint
+                ds = math.hypot(sp.geometry.x - gcx, sp.geometry.y - gcy)
+                de = math.hypot(ep.geometry.x - gcx, ep.geometry.y - gcy)
+                return ep if ds < de else sp        # end farther from centre
+
+            tops = [_flank_top(f) for f in flank_lines[:2]]
+            for cap_end in (cap.startSketchPoint, cap.endSketchPoint):
+                best, bestd = None, 1e18
+                for t in tops:
+                    d = math.hypot(cap_end.geometry.x - t.geometry.x,
+                                   cap_end.geometry.y - t.geometry.y)
+                    if d < bestd:
+                        bestd, best = d, t
+                if best is not None:
+                    try:
+                        gc.addCoincident(cap_end, best)
+                    except Exception:
+                        futil.handle_error('cap endpoint coincident with flank top')
+            for f in flank_lines[:2]:
+                try:
+                    gc.addTangent(cap, f)
+                except Exception:
+                    futil.handle_error('cap tangent to flank')
 
     futil.log(f'build_gear {name}: profiles={sketch.profiles.count}')
     disk_prof, tooth_profs = _nearest_profile(sketch.profiles, cx * MM_TO_CM, cy * MM_TO_CM)
