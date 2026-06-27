@@ -314,6 +314,7 @@ def build_gear(component: adsk.fusion.Component, occurrence, profile: gear_math.
     # Constraints step 2b: locate this gear by meshing -- reference an external
     # pitch circle (e.g. the wheel's) and make this gear's pitch circle tangent
     # to it (pitch circles tangent == meshing center distance).
+    wheel_center_pt = None      # the wheel centre projected into this sketch (set below)
     if mesh_to_pitch is not None:
         try:
             # When the wheel lives in a different component, the pitch circle must be
@@ -333,6 +334,10 @@ def build_gear(component: adsk.fusion.Component, occurrence, profile: gear_math.
             except Exception:
                 futil.handle_error('set referenced pitch circle to construction')
             gc.addTangent(pitch_circle, ref)
+            # The included pitch circle's centre IS the wheel centre in this sketch;
+            # the line of centers / phase reference anchors to it (NOT the sketch
+            # origin -- they differ when the wheel centre is an off-origin point).
+            wheel_center_pt = ref.centerSketchPoint
             # The tangent fixes the meshing centre distance but deliberately leaves
             # ONE DOF: the pinion can swing around the wheel on the locus of valid
             # centres. The user adds their own constraint (coincident to an axle
@@ -474,13 +479,18 @@ def build_gear(component: adsk.fusion.Component, occurrence, profile: gear_math.
                 futil.handle_error('cap tangent to flank')
 
         # Phase: pin the pinion's rotation with an angular dimension between its
-        # centerline and the line of centers (pinion centre -> wheel centre, which
-        # is the sketch origin).
+        # centerline and the line of centers (pinion centre -> wheel centre). The
+        # wheel centre is `wheel_center_pt` (the projected wheel pitch centre), which
+        # is the sketch origin ONLY when the wheel sits at the origin -- anchor to it,
+        # not the origin, so an off-origin wheel centre still gives the true line of
+        # centers. (Falls back to the origin if the mesh reference is unavailable.)
+        wc_pt = wheel_center_pt if wheel_center_pt is not None else sketch.originPoint
         try:
-            loc = sketch.sketchCurves.sketchLines.addByTwoPoints(_pt(cx, cy), _pt(0.0, 0.0))
+            loc = sketch.sketchCurves.sketchLines.addByTwoPoints(_pt(cx, cy),
+                                                                 _pt(*draw_offset))
             loc.isConstruction = True
             gc.addCoincident(loc.startSketchPoint, pitch_circle.centerSketchPoint)
-            gc.addCoincident(loc.endSketchPoint, sketch.originPoint)
+            gc.addCoincident(loc.endSketchPoint, wc_pt)
             atp = adsk.core.Point3D.create(cx * MM_TO_CM - 1.0, cy * MM_TO_CM - 1.0, 0.0)
             sketch.sketchDimensions.addAngularDimension(centerline, loc, atp, True)
         except Exception:
