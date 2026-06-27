@@ -5,3 +5,4 @@ __pycache__/
 PerfectPrintGears.log
 /.vscode/
 /.idea/workspace.xml
+/.ai/
