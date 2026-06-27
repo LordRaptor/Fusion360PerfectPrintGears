@@ -248,3 +248,16 @@ def test_gear_outlines_form_single_closed_loop():
         segs = prof.segments
         for cur, nxt in zip(segs, segs[1:] + segs[:1]):
             assert cur.points[-1] == pytest.approx(nxt.points[0], abs=1e-6)
+
+
+# ------------------------------------------------------------------ ratio format
+def test_format_ratio_integer_reduction():
+    assert gm.format_ratio(60, 12) == "5.00 : 1 (5 : 1)"
+
+
+def test_format_ratio_non_integer():
+    assert gm.format_ratio(50, 15) == "3.33 : 1 (10 : 3)"
+
+
+def test_format_ratio_equal_counts():
+    assert gm.format_ratio(20, 20) == "1.00 : 1 (1 : 1)"

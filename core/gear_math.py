@@ -86,6 +86,15 @@ def validate_inputs(inp: GearInputs) -> None:
         raise ValueError("feature width is too large for the pinion size")
 
 
+def format_ratio(wheel_teeth: int, pinion_teeth: int) -> str:
+    """Human-readable reduction ratio: decimal to 2 dp plus the GCD-reduced
+    integer pair, e.g. format_ratio(50, 15) == "3.33 : 1 (10 : 3)"."""
+    decimal = wheel_teeth / pinion_teeth
+    g = math.gcd(int(wheel_teeth), int(pinion_teeth))
+    rw, rp = int(wheel_teeth) // g, int(pinion_teeth) // g
+    return f"{decimal:.2f} : 1 ({rw} : {rp})"
+
+
 # ===================================================================== 2D math
 def rotate_point(p: Point, center: Point, angle: float) -> Point:
     s, c = math.sin(angle), math.cos(angle)
