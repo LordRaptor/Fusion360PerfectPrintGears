@@ -249,6 +249,33 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
     _constrain_flanks(sketch, flank_lines, root_circle, cx * MM_TO_CM, cy * MM_TO_CM,
                       wheel=lock_center, centerline=centerline)
 
+    # Constraints step 4 (wheel tip): the apex sits on the centerline end and on the
+    # addendum circle; the lower tip spline's shape can't be dimensioned so fix it,
+    # then mirror it to the upper tip via symmetry about the centerline.
+    if lock_center and centerline is not None:
+        lower_spline = next((e for (s, e) in drawn
+                             if s.kind == 'spline' and s.clamp_start), None)
+        upper_spline = next((e for (s, e) in drawn
+                             if s.kind == 'spline' and s.clamp_end), None)
+        if lower_spline is not None:
+            try:
+                gc.addCoincident(centerline.endSketchPoint, add_circle)
+            except Exception:
+                futil.handle_error('centerline end coincident with addendum circle')
+            try:
+                gc.addCoincident(lower_spline.endSketchPoint, centerline.endSketchPoint)
+            except Exception:
+                futil.handle_error('tip apex coincident with centerline end')
+            try:
+                lower_spline.isFixed = True
+            except Exception:
+                futil.handle_error('fix lower tip spline')
+            if upper_spline is not None:
+                try:
+                    gc.addSymmetry(lower_spline, upper_spline, centerline)
+                except Exception:
+                    futil.handle_error('mirror tip spline across centerline')
+
     futil.log(f'build_gear {name}: profiles={sketch.profiles.count}')
     disk_prof, tooth_profs = _nearest_profile(sketch.profiles, cx * MM_TO_CM, cy * MM_TO_CM)
 
