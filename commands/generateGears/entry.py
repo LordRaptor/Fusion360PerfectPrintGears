@@ -70,12 +70,20 @@ def _build_inputs(inputs):
             s = settings.from_json(attr.value)
     futil.log(f'build: settings = {s}')
 
-    futil.log('build: target')
-    sel = inputs.addSelectionInput('target', 'Target component',
-                                   'Component to draw the gear sketches into')
-    sel.addSelectionFilter('Occurrences')
-    sel.addSelectionFilter('RootComponents')
-    sel.setSelectionLimits(0, 1)
+    futil.log('build: wheelComponent')
+    wsel = inputs.addSelectionInput('wheelComponent', 'Wheel component',
+                                    'Component to draw the wheel into (default: active)')
+    wsel.addSelectionFilter('Occurrences')
+    wsel.addSelectionFilter('RootComponents')
+    wsel.setSelectionLimits(0, 1)
+
+    futil.log('build: pinionComponent')
+    psel = inputs.addSelectionInput('pinionComponent', 'Pinion component',
+                                    'Component to draw the pinion into '
+                                    '(default: same as the wheel)')
+    psel.addSelectionFilter('Occurrences')
+    psel.addSelectionFilter('RootComponents')
+    psel.setSelectionLimits(0, 1)
 
     futil.log('build: sketchPlane')
     plane_sel = inputs.addSelectionInput('sketchPlane', 'Sketch plane',
@@ -227,15 +235,19 @@ def command_validate(args: adsk.core.ValidateInputsEventArgs):
         args.areInputsValid = False
 
 
-def _resolve_target(inputs):
+def _resolve_occurrence(inputs, input_id):
+    """Resolve a component selection to (component, occurrence). The occurrence is
+    None when the target is the root or active component (no assembly context is
+    needed); for a selected instance it carries the context required to create a
+    sketch in that component and to proxy geometry across components."""
     design = adsk.fusion.Design.cast(app.activeProduct)
-    sel = inputs.itemById('target')
+    sel = inputs.itemById(input_id)
     if sel.selectionCount == 1:
         entity = sel.selection(0).entity
         if isinstance(entity, adsk.fusion.Occurrence):
-            return entity.component
-        return entity  # a Component (root)
-    return design.activeComponent
+            return entity.component, entity
+        return entity, None  # a root Component
+    return design.activeComponent, None
 
 
 def _resolve_plane(inputs):
@@ -282,11 +294,19 @@ def command_execute(args: adsk.core.CommandEventArgs):
     try:
         gi = _read_inputs(inputs)
         pair = gear_math.build_gear_pair(gi)
-        target = _resolve_target(inputs)
+        wheel_comp, wheel_occ = _resolve_occurrence(inputs, 'wheelComponent')
+        # An unselected pinion component defaults to the wheel's: Fusion won't let the
+        # same entity be picked in two selection inputs, so this is how you put both
+        # gears in one specific component (select it for the wheel, leave pinion empty).
+        if inputs.itemById('pinionComponent').selectionCount == 1:
+            pinion_comp, pinion_occ = _resolve_occurrence(inputs, 'pinionComponent')
+        else:
+            pinion_comp, pinion_occ = wheel_comp, wheel_occ
         plane = _resolve_plane(inputs)
         wheel_center = _resolve_wheel_center(inputs)
         thickness_mm = inputs.itemById('thickness').value / 0.1
-        sketch_builder.build_pair(target, pair, thickness_mm, plane, wheel_center)
+        sketch_builder.build_pair(wheel_comp, wheel_occ, pinion_comp, pinion_occ,
+                                  pair, thickness_mm, plane, wheel_center)
         _persist_settings(inputs)
         futil.log(f'{CMD_NAME}: generated {pair.wheel.teeth}T / {pair.pinion.teeth}T')
     except Exception:

@@ -152,10 +152,10 @@ def _nearest_profile(profiles, cx_cm, cy_cm):
     return ranked[0][1], [p for _, p in ranked[1:]]
 
 
-def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
+def build_gear(component: adsk.fusion.Component, occurrence, profile: gear_math.GearProfile,
                thickness_mm: float, name: str, plane,
                lock_center: bool = False, mesh_to_pitch=None, center_point=None,
-               draw_offset=(0.0, 0.0)):
+               draw_offset=(0.0, 0.0), mesh_occ=None):
     """Sketch (root circle + one tooth) -> extrude the disk (new body) and the
     tooth (join) -> circular-pattern ONLY the tooth extrude `teeth` times about
     the root circle. Yields a single clean gear body (disk + N teeth).
@@ -176,7 +176,13 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
     cx, cy = cx + draw_offset[0], cy + draw_offset[1]
     th_cm = thickness_mm * MM_TO_CM
 
-    sketch = component.sketches.add(plane)
+    # Create the sketch in this component's context. When the target is a placed
+    # occurrence, occurrenceForCreation supplies the assembly context (the same thing
+    # Fusion does when you activate a component and sketch in the UI).
+    if occurrence is not None:
+        sketch = component.sketches.add(plane, occurrence)
+    else:
+        sketch = component.sketches.add(plane)
     sketch.name = name
 
     # Anchor the wheel to a picked point BEFORE drawing: project it, then draw the
@@ -247,7 +253,16 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
     # to it (pitch circles tangent == meshing center distance).
     if mesh_to_pitch is not None:
         try:
-            ref = sketch.include(mesh_to_pitch).item(0)
+            # When the wheel lives in a different component, the pitch circle must be
+            # taken in the wheel's assembly context (a proxy) before it can be
+            # projected into this (pinion) sketch.
+            ref_pitch = mesh_to_pitch
+            if mesh_occ is not None:
+                try:
+                    ref_pitch = mesh_to_pitch.createForAssemblyContext(mesh_occ)
+                except Exception:
+                    futil.handle_error('proxy wheel pitch circle for assembly context')
+            ref = sketch.include(ref_pitch).item(0)
             # MUST be construction, else the big projected circle adds profiles and
             # breaks the extrude.
             try:
@@ -423,33 +438,40 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
     return sketch, pitch_circle, (cx, cy)
 
 
-def build_pair(component: adsk.fusion.Component, pair: gear_math.GearPair,
-               thickness_mm: float = 5.0, plane=None, wheel_center=None) -> None:
-    """Build both gears into `component` in meshing layout. The wheel is built
-    first with its circle centres locked to the origin; the pinion then references
-    the wheel's pitch circle and is constrained tangent to it (the mesh).
+def build_pair(wheel_component: adsk.fusion.Component, wheel_occurrence,
+               pinion_component: adsk.fusion.Component, pinion_occurrence,
+               pair: gear_math.GearPair, thickness_mm: float = 5.0,
+               plane=None, wheel_center=None) -> None:
+    """Build the wheel and pinion into their (possibly separate) components in a
+    meshing layout. Each `*_occurrence` is the selected instance (or None for the
+    root/active component); it provides the assembly context to create the sketch in
+    that component and to proxy the wheel's pitch circle into the pinion's sketch for
+    the mesh. The wheel is built first (centre locked to the chosen point or origin);
+    the pinion then references the wheel's pitch circle tangent (the mesh).
 
-    `plane` is the planar entity (construction plane or planar face) the sketches
-    are drawn on; defaults to the component's XY construction plane. A selected
-    planar FACE is converted to a coincident construction plane first -- sketching
-    directly on a face drags the face's edges into profile detection (fragmenting
-    the disk, adding a leftover region); a construction plane has no edges, so the
-    gear profiles stay clean. The plane is defined BY the face, so the gears remain
-    associated with it."""
+    `plane` is the shared planar entity both sketches are drawn on; defaults to the
+    ROOT XY construction plane (a root-level plane works with occurrenceForCreation
+    for both components). A selected planar FACE is converted to a coincident
+    construction plane in the root first -- sketching directly on a face drags the
+    face's edges into profile detection (fragmenting the disk, adding a leftover
+    region); a construction plane has no edges, so the gear profiles stay clean."""
+    root = wheel_component.parentDesign.rootComponent
     if plane is None:
-        plane = component.xYConstructionPlane
+        plane = root.xYConstructionPlane
     elif isinstance(plane, adsk.fusion.BRepFace):
-        # Coincident construction plane = the face offset by zero. (Associative to
+        # Coincident construction plane = the face offset by zero, created in the
+        # root so it is shared/usable from both components' contexts. (Associative to
         # the face; ConstructionPlaneInput has no setByPlanarFace.)
-        ci = component.constructionPlanes.createInput()
+        ci = root.constructionPlanes.createInput()
         ci.setByOffset(plane, adsk.core.ValueInput.createByReal(0.0))
-        plane = component.constructionPlanes.add(ci)
-    _, wheel_pitch, wheel_xy = build_gear(component, pair.wheel, thickness_mm,
-                                          f'PPG Wheel {pair.wheel.teeth}T', plane,
-                                          lock_center=True, center_point=wheel_center)
+        plane = root.constructionPlanes.add(ci)
+    _, wheel_pitch, wheel_xy = build_gear(wheel_component, wheel_occurrence, pair.wheel,
+                                          thickness_mm, f'PPG Wheel {pair.wheel.teeth}T',
+                                          plane, lock_center=True, center_point=wheel_center)
     # Draw the pinion at wheel_centre + center_distance so it is born where the mesh
     # places it (the pinion has no fixed geometry, but drawing it in place keeps the
-    # profile picker accurate and minimises solver movement).
-    build_gear(component, pair.pinion, thickness_mm,
+    # profile picker accurate and minimises solver movement). mesh_occ carries the
+    # wheel's context so its pitch circle can be proxied into the pinion sketch.
+    build_gear(pinion_component, pinion_occurrence, pair.pinion, thickness_mm,
                f'PPG Pinion {pair.pinion.teeth}T', plane, mesh_to_pitch=wheel_pitch,
-               draw_offset=wheel_xy)
+               draw_offset=wheel_xy, mesh_occ=wheel_occurrence)
