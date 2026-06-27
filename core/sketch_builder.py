@@ -307,8 +307,9 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
                     futil.handle_error('mirror tip spline fit points')
     else:
         # Pinion cap: coincident the arc endpoints with the flank tops, then make
-        # the arc tangent to both flanks. With the width offset dimension this
-        # fixes the cap radius (no radius dimension needed).
+        # the arc tangent to ONE flank. Both endpoints are pinned to the flank tops
+        # and the flanks are parallel, so a single tangent already fixes the arc's
+        # radius and orientation -- a second tangent over-constrains the sketch.
         cap = next((e for (s, e) in drawn if s.kind == 'arc3'), None)
         if cap is not None and len(flank_lines) >= 2:
             gcx, gcy = cx * MM_TO_CM, cy * MM_TO_CM
@@ -332,11 +333,10 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
                         gc.addCoincident(cap_end, best)
                     except Exception:
                         futil.handle_error('cap endpoint coincident with flank top')
-            for f in flank_lines[:2]:
-                try:
-                    gc.addTangent(cap, f)
-                except Exception:
-                    futil.handle_error('cap tangent to flank')
+            try:
+                gc.addTangent(cap, flank_lines[0])
+            except Exception:
+                futil.handle_error('cap tangent to flank')
 
         # Phase: pin the pinion's rotation with an angular dimension between its
         # centerline and the line of centers (pinion centre -> wheel centre, which
