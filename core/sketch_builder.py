@@ -12,8 +12,14 @@ import adsk.core
 import adsk.fusion
 
 from . import gear_math
+from ..lib import fusionAddInUtils as futil
 
 MM_TO_CM = 0.1
+
+# Auto tangent constraints are OFF for now: applying ~100+ constraints with the
+# solver live distorts the (already-correct) placed geometry and is very slow.
+# Proper parametric constraints are a planned later rework.
+DRAW_TANGENT_CONSTRAINTS = False
 
 
 def _pt(x_mm: float, y_mm: float) -> adsk.core.Point3D:
@@ -86,6 +92,20 @@ def draw_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
     sketch.name = name
     cx, cy = profile.center
 
+    # Diagnostics: counts + bounding box (mm) so the log cross-checks scale/placement.
+    kinds = {}
+    xs, ys = [], []
+    for s in profile.segments:
+        kinds[s.kind] = kinds.get(s.kind, 0) + 1
+        for (x, y) in s.points:
+            xs.append(x + cx); ys.append(y + cy)
+    futil.log(f'draw_gear {name}: center=({cx:.3f},{cy:.3f})mm segments={len(profile.segments)} '
+              f'kinds={kinds} pitch_r={profile.pitch_radius:.3f} root_r={profile.root_radius:.3f} '
+              f'add_r={profile.addendum_radius:.3f}')
+    if xs:
+        futil.log(f'  bbox mm: x[{min(xs):.3f},{max(xs):.3f}] y[{min(ys):.3f},{max(ys):.3f}] '
+                  f'(drawn in cm = mm*{MM_TO_CM})')
+
     sketch.isComputeDeferred = True
     try:
         sketch.sketchPoints.add(_pt(cx, cy))
@@ -99,8 +119,11 @@ def draw_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
     finally:
         sketch.isComputeDeferred = False
 
-    # Tangencies added after the solver is live so it can apply them.
-    _add_tangencies(sketch, drawn)
+    futil.log(f'draw_gear {name}: drew {len(drawn)} curves, '
+              f'tangent_constraints={"on" if DRAW_TANGENT_CONSTRAINTS else "off"}')
+    if DRAW_TANGENT_CONSTRAINTS:
+        # Tangencies added after the solver is live so it can apply them.
+        _add_tangencies(sketch, drawn)
     return sketch
 
 
