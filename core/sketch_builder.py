@@ -90,7 +90,6 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
 
     sketch.isComputeDeferred = True
     try:
-        sketch.sketchPoints.add(_pt(cx, cy))
         circles = sketch.sketchCurves.sketchCircles
         # Root circle REAL (bounds the disk profile + serves as the pattern axis);
         # pitch/addendum drawn as construction references.
@@ -144,7 +143,13 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
             except Exception:
                 futil.handle_error('set referenced pitch circle to construction')
             gc.addTangent(pitch_circle, ref)
-            futil.log(f'build_gear {name}: pitch circle tangent to referenced wheel pitch circle')
+            # line of centers: keep this gear's centre horizontal with the wheel's,
+            # removing the rotate-around-the-wheel DOF (-> pinion fully located).
+            try:
+                gc.addHorizontalPoints(pitch_circle.centerSketchPoint, ref.centerSketchPoint)
+            except Exception:
+                futil.handle_error('addHorizontalPoints(pinion center, wheel center)')
+            futil.log(f'build_gear {name}: pitch tangent + centre horizontal with wheel')
         except Exception:
             futil.handle_error('mesh tangent to wheel pitch circle')
 
