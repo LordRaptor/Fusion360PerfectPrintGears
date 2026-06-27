@@ -197,6 +197,25 @@ def radius_at_angle(a: float, pinion_teeth: int, wheel_teeth: int) -> float:
     return (math.sin(t1) * rg) / math.sin(b)
 
 
+def _wheel_addendum_height(inp: GearInputs, geo: DerivedGeometry) -> float:
+    """Radial height the wheel's epicycloidal tip rises above its pitch circle.
+    Used to size the PINION root so the wheel tip clears the pinion's root."""
+    rw = geo.pitch_radius_wheel
+    half_w = inp.feature_width_mm / 2.0 - inp.clearance_mm / 2.0
+    if half_w <= 0:
+        return 0.0
+    w_amid = math.asin(half_w / rw)
+    apex_r = radius_at_angle(w_amid, inp.pinion_teeth, inp.wheel_teeth) * rw
+    return apex_r - rw
+
+
+def _pinion_addendum_height(inp: GearInputs) -> float:
+    """Radial height the pinion's rounded cap rises above its pitch circle (the cap
+    is a semicircle of radius half the full feature width). Used to size the WHEEL
+    root so the pinion tip clears the wheel's root."""
+    return inp.feature_width_mm / 2.0
+
+
 def _build_wheel_tooth_cycloidal(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
     """Cycloidal wheel tooth centered on the +x axis (ported from the prototype's
     `wheel_tooth`): epicycloidal addendum (edge at the pitch circle, apex on the
@@ -215,7 +234,10 @@ def _build_wheel_tooth_cycloidal(inp: GearInputs, geo: DerivedGeometry) -> List[
         raise ValueError("clearance narrows the wheel tooth to zero width")
 
     w_amid = math.asin(half_w / rw)        # half tooth angle at the pitch circle
-    root_radius = rw - (inp.module_mm * 1.25 * inp.dedendum_factor)
+    # Root depth must clear the MATING tooth's tip (the pinion cap) plus clearance.
+    root_radius = rw - (_pinion_addendum_height(inp) + inp.clearance_mm) * inp.dedendum_factor
+    if root_radius <= 0:
+        raise ValueError("computed wheel root radius is non-positive; teeth too large")
     steps = max(8, inp.resolution)
 
     # Addendum upper half: angle aa runs 0 (at the edge / pitch circle) -> w_amid
@@ -313,7 +335,11 @@ def build_pinion_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
     wheel); only the flanks are working surfaces.
     """
     half_w = inp.feature_width_mm / 2.0
-    root_radius = geo.pitch_radius_pinion - (inp.module_mm * 1.25 * inp.dedendum_factor)
+    # Root depth must clear the MATING tooth's tip (the wheel's epicycloidal tip)
+    # plus clearance, so the wheel tip never bottoms into the pinion root.
+    root_radius = geo.pitch_radius_pinion - (_wheel_addendum_height(inp, geo) + inp.clearance_mm) * inp.dedendum_factor
+    if root_radius <= 0:
+        raise ValueError("computed pinion root radius is non-positive; teeth too large")
     # The pinion's WORKING flank is the part below the pitch circle (it is driven by
     # the wheel tip). Above the pitch circle the tooth is a free rounded cap. Per
     # Peterson's diagrams, the semicircular tip is centred ON the pitch circle, so
@@ -321,10 +347,13 @@ def build_pinion_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
     # (radius half_w) sits on top, reaching pitch_radius + half_w.
     flank_top_x = geo.pitch_radius_pinion
 
-    lower_root = (root_radius, -half_w)
+    # Foot x so the flank foot sits ON the root circle (|foot| == root_radius),
+    # accounting for the half_w offset of the parallel flank.
+    foot_x = math.sqrt(max(root_radius ** 2 - half_w ** 2, 0.0))
+    lower_root = (foot_x, -half_w)
     lower_flank_top = (flank_top_x, -half_w)
     upper_flank_top = (flank_top_x, half_w)
-    upper_root = (root_radius, half_w)
+    upper_root = (foot_x, half_w)
     tip_mid = (flank_top_x + half_w, 0.0)            # outermost point of the cap
 
     segs: List[Segment] = []
