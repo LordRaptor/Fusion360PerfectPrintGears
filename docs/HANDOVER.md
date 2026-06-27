@@ -216,6 +216,15 @@ above** — you don't strictly need the scripts, but `ghelpers.py` is worth keep
 
 ## 8. NEXT STEP — reconstruct Peterson's envelope method from scratch
 
+> ### ‼ WORKING MODE (read first)
+> The geometry rebuild MUST be done **step by step, collaboratively with the user**. The
+> agent must **NOT** go off and implement the whole method on its own. Propose one small
+> step (a definition, a single construction element, a sign convention, a diagram), **show
+> it / confirm it with the user, and wait** before proceeding to the next. The user is
+> driving the derivation; the agent supplies math, code, and visualizations on request. Do
+> not run the interference test or build the full tooth until the user asks. (This is why
+> the previous long session worked — the user caught real errors the agent missed.)
+
 User's decision: **go back to Peterson's method and rebuild it cleanly.** Peterson's literal
 construction (PDF pp. 63–64):
 1. Draw the pinion working flank as a line.
