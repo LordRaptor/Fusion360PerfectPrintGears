@@ -2,6 +2,55 @@
 
 <!-- version list -->
 
+## v1.6.0 (2026-06-27)
+
+### Bug Fixes
+
+- **fusion**: Suppress startup message box when auto-loading at launch
+  ([`2d94a77`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/2d94a77f507d3c849a254069e7e9f30d52724ec5))
+
+### Chores
+
+- Update .gitignore
+  ([`24e12f8`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/24e12f801c073534b51a8fb15087b6e373fc1c9d))
+
+- **fusion**: Do not promote the command to the panel
+  ([`a02e76c`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/a02e76c1e01562ef138e6a20cbf593834c1239bf))
+
+- **fusion**: Quiet the Text Commands palette to errors only
+  ([`f0b9445`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/f0b944596edd4504c7705e74e889929756fb7566))
+
+### Documentation
+
+- Mark editable tooth width done (PR #9)
+  ([`f587e16`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/f587e1628cd06d100e926566b5f64257b6304478))
+
+- Tooth width is now an editable, module-linked input
+  ([`007d370`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/007d3704f3a14332d2053490367b6b67caecb1ec))
+
+- **plan**: Editable, module-linked tooth width implementation plan
+  ([`47b7799`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/47b7799e1918e1d688504c0fcd63ff66a10075b2))
+
+- **spec**: Editable, module-linked tooth width design
+  ([`8eaa985`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/8eaa985424c68c757ff756ef591a588b975bec7e))
+
+### Features
+
+- **engine**: Add tooth-width <-> module helpers
+  ([`bf910e1`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/bf910e1e24098cb4303bcd346ea457dc60bab87b))
+
+- **fusion**: Editable tooth width linked bidirectionally with module
+  ([`f9638ba`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/f9638baf700458d95986a21424cd9f6070c5635f))
+
+### Refactoring
+
+- Remove inert addendum factor input
+  ([`274f14f`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/274f14f3c86dee7183acb8cd120a6f02fff17483))
+
+- **fusion**: Group module/tooth-fraction/tooth-width in a Tooth sizing group
+  ([`fbffd97`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/fbffd973336d81cfa7d9743ff961fc09eeae5ffe))
+
+
 ## v1.5.0 (2026-06-27)
 
 ### Bug Fixes
