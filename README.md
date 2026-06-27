@@ -47,7 +47,10 @@ Open **Solid → Create → Generate Perfect Print Gears** and set:
 
 | Input | Meaning |
 |---|---|
-| **Target component** | Where the two gears are built (defaults to the active component). |
+| **Wheel component** | Component to build the wheel into (defaults to the active component). |
+| **Pinion component** | Component to build the pinion into (defaults to the **same as the wheel**). Select different components to split the pair across components — the pinion still meshes to the wheel across components. To put both in one specific component, set it here as the wheel and leave this empty (Fusion won't allow the same component in both pickers). |
+| **Sketch plane** *(optional)* | Construction plane or planar face the gear sketches are drawn on (defaults to the root XY plane). Shared by both gears so they stay coplanar and mesh. A picked face is used via a coincident construction plane, so even a small axle-top face works. |
+| **Wheel center** *(optional)* | Point (sketch point, construction point, or vertex) to place the wheel center on (defaults to the sketch origin). The pinion meshes relative to the wheel. |
 | **Wheel teeth / Pinion teeth** | Tooth counts (pinion ≥ 6, wheel ≥ pinion). |
 | **Gear ratio** *(read-only)* | Displays the resulting ratio as a decimal and reduced integer form, e.g. `3.33 : 1 (10 : 3)`. Updates live as tooth counts change. |
 | **Module (mm)** | Sets the tooth size / pitch. `circular pitch = π · module`. |
