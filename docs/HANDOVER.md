@@ -84,9 +84,11 @@ interference test (this consistency is what fixed the long-running failure):
 - The contact point is the **foot of the perpendicular from the pitch point onto the flank**
   (exact for a straight flank), carried into the wheel frame. Cross-checked against
   consecutive-line intersection (agree ~0.01 mm).
-- Tip trimmed from the flank join to the centerline apex; mirrored; emitted as a **fitted
-  spline of ~4 fit points/half** (the `resolution` input). Apex is a **sharp point** (printer
-  smooths it).
+- Tip trimmed from the flank join to the centerline apex; mirrored; emitted as a **control-point
+  (Bézier) spline per half** (`fit_tip_bezier`; `resolution` selects degree 3 = 4 control points
+  ≈3 µm, or 5–6 = degree 5). Was a fitted spline; switched so the tip has no tangent-handle DOF
+  and can be fully constrained + rotated (see §6.2). Apex is a **sharp point** (printer smooths
+  it). Optional `tangent_join` leaves the flank join tangent (smoother, worse fit).
 - **Tooth width is derived from the module:** `w = TOOTH_FRACTION · π·module`. There are
   **no user parameters** for regeneration — Peterson's tip can't be regenerated parametrically;
   changing any input requires re-running the add-in. `TOOTH_FRACTION` (**default 0.45**) is the
@@ -177,10 +179,17 @@ The user will start these next (collaboratively, step by step):
 1. ~~**Split wheel and pinion into their own components**~~ — **DONE** (branch
    `feat/placement-targeting`; see the Placement & targeting note at the top). Also done in that
    branch: selectable sketch plane / planar face, and a selectable wheel centre point.
-2. **Rotate-the-arrangement option** — deliberately set up: the wheel centerline is
-   horizontal-constrained and flanks are parallel to it, so rotating only needs to swap that
-   horizontal for an **angle dimension**; the pinion phase already references the line of
-   centers.
+2. **Rotatable wheel** — **DONE** (branch `feat/wheel-rotation`; spec/plan dated 2026-06-27).
+   The blocker was the wheel tip: a *fitted* spline carries tangent/curvature handle DOF that
+   only `isFixed` (absolute → non-rotatable) removes. The tip is now a **control-point (Bézier)
+   spline** (`'cpspline'` segment; `fit_tip_bezier` in the engine, degree 3 = 4 control points
+   ≈3 µm, degree 5 = 6) — no handle DOF, so its control points are fully constrained and the
+   wheel orientation is an **angle dimension** (centerline vs a vertical reference, home 90°; a
+   0° dim vs a horizontal reference is degenerate). A new **Tangent tip join** toggle opts into a
+   tangent (smoother, worse-fitting) join. `_orient_wheel(use_angle_dim=...)` keeps the plain-
+   horizontal path for the next step. Remaining for **rotate-the-arrangement**: drive that angle
+   from the dialog and rotate wheel + pinion together (the pinion phase already references the
+   line of centers).
 3. Optionally **wire phase/rotation (and maybe thickness/factors) into the dialog** as inputs.
 4. (Lower priority) the original Task 18 acceptance checklist / extrude-one-tooth checks are
    effectively satisfied; tidy README/screenshots if desired.

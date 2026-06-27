@@ -3,7 +3,7 @@
     "type": "addin",
     "author": "Christopher Schank",
     "description": {
-        "": "Generates Perfect Print gear pairs as sketches"
+        "": "Generates matched Perfect Print wheel + pinion gears as solid bodies"
     },
     "version": "1.2.0",
     "runOnStartup": false,

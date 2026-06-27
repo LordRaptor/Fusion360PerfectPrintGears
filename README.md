@@ -57,7 +57,8 @@ Open **Solid → Create → Generate Perfect Print Gears** and set:
 | **Tooth fraction** | Tooth width as a fraction of the circular pitch (0–0.5). **This is the backlash knob:** 0.5 = equal tooth and space; below 0.5 thins the teeth for circumferential play. The resulting **tooth width** is shown read-only. |
 | **Clearance** | Radial tip-to-root play (absolute mm or % of tooth width). Independent of tooth fraction. |
 | **Advanced → Addendum / Dedendum factor** | Optional root-depth scaling. |
-| **Advanced → Tip spline points** | Number of fit points per wheel-tip half (default 4). |
+| **Advanced → Tip control points** | Control points per wheel-tip half: **4** (degree-3 Bézier, default) or **5–6** (degree-5). The tip is a control-point spline, so it is fully constrained and the wheel can be rotated by editing its orientation dimension. |
+| **Advanced → Tangent tip join** | Make the tip leave the flank join **tangent** (smoother) instead of the faithful conjugate corner. Fits the envelope less well — a warning recommends 5+ control points when this is enabled. |
 
 Click **OK** to draw the pair. Invalid combinations disable OK and show an inline
 message.
@@ -75,10 +76,14 @@ one consistent kinematic model (the pinion rotates `+τ` about its center while 
 wheel rotates `−τ/ratio` about its). For a straight flank the contact point is the
 **foot of the perpendicular from the pitch point onto the flank**; sweeping `τ`
 traces the tip locus. It is trimmed from the flank join up to the centerline apex,
-mirrored, and represented as a fitted spline. The join to the flank is **not**
-tangent — there is a real ~12° corner; forcing tangency deviates from the true
-envelope more, so the faithful (non-tangent) shape is kept. The apex is a sharp
-point (your printer rounds it).
+mirrored, and represented as a **control-point (Bézier) spline** — a degree-3
+(4 control points) or degree-5 (6) curve fitted to the envelope (~3 µm at degree 3).
+A control-point spline has no tangent handles, so its control points can be fully
+constrained — which is what lets the wheel sketch be **rotated** by editing an angle
+dimension. By default the join to the flank is **not** tangent — there is a real
+~12° corner; forcing tangency (the optional *Tangent tip join*) deviates from the
+true envelope more, so the faithful non-tangent shape is the default. The apex is a
+sharp point (your printer rounds it).
 
 The engine (`core/gear_math.py`) is **pure Python** (no Fusion, no third-party
 deps), so the conjugation math is unit-tested without Fusion — including a
