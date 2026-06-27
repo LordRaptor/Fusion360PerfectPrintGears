@@ -416,6 +416,12 @@ def build_gear(component: adsk.fusion.Component, occurrence, profile: gear_math.
     disk_in.setDistanceExtent(False, dist)
     disk_ext = extrudes.add(disk_in)
     base_body = disk_ext.bodies.item(0)
+    # Name the body after the sketch; the tooth join + pattern merge into this body,
+    # so it is the final gear body (e.g. "PPG Wheel 50T").
+    try:
+        base_body.name = name
+    except Exception:
+        futil.handle_error('name gear body')
 
     # Tooth -> join onto the disk body.
     tooth_coll = adsk.core.ObjectCollection.create()
