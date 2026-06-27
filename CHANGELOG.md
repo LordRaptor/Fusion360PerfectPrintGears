@@ -2,6 +2,24 @@
 
 <!-- version list -->
 
+## v1.5.0 (2026-06-27)
+
+### Bug Fixes
+
+- **fusion**: Anchor pinion line of centers to the wheel centre, not the origin
+  ([`2026a33`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/2026a33d443464f512e6902649d42caae7d9e31a))
+
+### Documentation
+
+- Add free-swing-pinion design spec
+  ([`a870466`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/a87046613f2b93f741f3ba70fb0dcd4ebf04c990))
+
+### Features
+
+- **fusion**: Leave the pinion free to swing for feature alignment
+  ([`c4e080c`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/c4e080ca948a30adecdfd605e320303d7c0f7a64))
+
+
 ## v1.4.0 (2026-06-27)
 
 ### Documentation
