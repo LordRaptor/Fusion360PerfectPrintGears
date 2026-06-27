@@ -31,7 +31,8 @@ class GearInputs:
     clearance_mm: float = 0.1            # radial tip-to-root play
     addendum_factor: float = 1.0         # reserved (tip is conjugate-geometric)
     dedendum_factor: float = 1.0         # scales root depth
-    resolution: int = 4                  # spline fit points per tip half
+    resolution: int = 4                  # tip control points: <=4 -> degree 3, else degree 5
+    tangent_join: bool = False           # tip leaves the flank join tangent (smoother, worse fit)
 
 
 @dataclass
@@ -462,11 +463,12 @@ def wheel_tip_points(inp: GearInputs, geo: DerivedGeometry,
 # ===================================================================== segments
 @dataclass
 class Segment:
-    kind: str                            # 'line' | 'spline' | 'arc3'
-    points: List[Point]
+    kind: str                            # 'line' | 'spline' | 'arc3' | 'cpspline'
+    points: List[Point]                  # for 'cpspline': the Bezier control points
     # for 'spline' tips: leave the named end tangent to the (horizontal) flank
     clamp_start: bool = False
     clamp_end: bool = False
+    degree: int = 0                      # for 'cpspline': Bezier degree (3 or 5)
 
 
 def _pinion_cap_apex_x(geo: DerivedGeometry) -> float:
@@ -475,25 +477,27 @@ def _pinion_cap_apex_x(geo: DerivedGeometry) -> float:
 
 def build_wheel_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
     """One wheel tooth centered on the +x axis, as a connected counter-clockwise
-    list of Segments: lower flank (line) -> lower tip (spline) -> upper tip
-    (spline) -> upper flank (line). The tip is the conjugate envelope as a clamped
-    spline (resolution fit points per half) that leaves each flank join horizontal.
-    The apex is a sharp point (printer smooths it)."""
+    list of Segments: lower flank (line) -> lower tip (cpspline) -> upper tip
+    (cpspline) -> upper flank (line). The tip is the conjugate envelope fitted as a
+    single clamped Bezier per half (a control-point spline -- no tangent-handle DOF,
+    so it can be fully constrained and rotated in the sketch). `resolution` selects
+    the degree (<=4 -> 3, else 5); `tangent_join` makes the tip leave the flank join
+    horizontally. The apex is a sharp point (printer smooths it)."""
     rw = geo.pitch_radius_wheel
     hw = geo.half_w
-    n_fit = max(3, inp.resolution)
 
-    locus = wheel_tip_points(inp, geo)
-    lower = _resample_arclength(locus, n_fit)        # join(y=-hw) -> apex(y=0)
+    locus = wheel_tip_points(inp, geo)               # join(y=-hw) -> apex(y=0)
     # snap the endpoints exactly onto the flank level and the centerline (the
     # tau-crossing scan lands within ~1e-7 of them)
-    lower[0] = (lower[0][0], -hw)
-    apex = (lower[-1][0], 0.0)
-    lower = lower[:-1] + [apex]
-    join_x = lower[0][0]
-    upper = [(x, -y) for (x, y) in reversed(lower)]  # apex -> join(y=+hw)
-
+    locus[0] = (locus[0][0], -hw)
+    apex = (locus[-1][0], 0.0)
+    locus[-1] = apex
+    join_x = locus[0][0]
     apex_x = apex[0]
+
+    degree = 3 if inp.resolution <= 4 else 5
+    lower = fit_tip_bezier(locus, degree, inp.tangent_join)   # control points
+    upper = [(x, -y) for (x, y) in reversed(lower)]  # apex -> join(y=+hw)
     wheel_tip_h = apex_x - rw
     # root clears the MATING tooth's tip (pinion cap) + clearance
     pinion_tip_h = _pinion_cap_apex_x(geo) - geo.pitch_radius_pinion
@@ -504,8 +508,8 @@ def build_wheel_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
 
     segs: List[Segment] = []
     segs.append(Segment('line', [(foot_x, -hw), (join_x, -hw)]))
-    segs.append(Segment('spline', lower, clamp_start=True))   # horizontal at join
-    segs.append(Segment('spline', upper, clamp_end=True))     # horizontal at join
+    segs.append(Segment('cpspline', lower, degree=degree))    # join -> apex
+    segs.append(Segment('cpspline', upper, degree=degree))    # apex -> join
     segs.append(Segment('line', [(join_x, hw), (foot_x, hw)]))
     return segs
 
@@ -546,7 +550,7 @@ def array_tooth(tooth: List[Segment], teeth: int, base_angle: float) -> List[Seg
         for seg in tooth:
             out.append(Segment(seg.kind,
                                [rotate_point(p, (0.0, 0.0), ang) for p in seg.points],
-                               seg.clamp_start, seg.clamp_end))
+                               seg.clamp_start, seg.clamp_end, seg.degree))
     return out
 
 
@@ -638,6 +642,8 @@ def densify_segments(segments: List[Segment], n_spline: int = 24,
             pts = _arc3_curve(s.points[0], s.points[1], s.points[2], n_arc)
         elif s.kind == 'spline':
             pts = spline_curve(s.points, s.clamp_start, s.clamp_end, n_spline)
+        elif s.kind == 'cpspline':
+            pts = bezier_curve(s.points, n_spline)
         else:
             pts = list(s.points)
         if out and pts and abs(out[-1][0] - pts[0][0]) < 1e-9 and abs(out[-1][1] - pts[0][1]) < 1e-9:

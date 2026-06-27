@@ -141,11 +141,11 @@ def test_wheel_tooth_structure_and_continuity():
     geo = gm.derive_geometry(inp)
     segs = gm.build_wheel_tooth(inp, geo)
 
-    assert [s.kind for s in segs] == ['line', 'spline', 'spline', 'line']
-    # the tip splines leave the flank joins tangent (horizontal)
-    assert segs[1].clamp_start is True
-    assert segs[2].clamp_end is True
-    # continuous path
+    assert [s.kind for s in segs] == ['line', 'cpspline', 'cpspline', 'line']
+    # default resolution -> degree-3 Bezier (4 control points) per tip half
+    assert segs[1].degree == 3
+    assert len(segs[1].points) == 4
+    # continuous path (clamped-Bezier ends ARE the first/last control points)
     for cur, nxt in zip(segs, segs[1:]):
         assert cur.points[-1] == pytest.approx(nxt.points[0], abs=1e-9)
     # apex where the two splines meet, on the centerline
@@ -169,11 +169,26 @@ def test_wheel_tooth_flanks_at_half_width_no_clearance_narrowing():
         assert pt[1] == pytest.approx(-geo.half_w, abs=1e-12)
 
 
-def test_wheel_tooth_resolution_controls_fit_points():
+def test_wheel_tooth_resolution_selects_degree5():
+    # resolution > 4 selects a degree-5 Bezier (6 control points) per tip half
     inp = _valid_inputs(resolution=6)
     geo = gm.derive_geometry(inp)
     segs = gm.build_wheel_tooth(inp, geo)
-    assert len(segs[1].points) == 6           # fit points per tip half
+    assert segs[1].degree == 5
+    assert len(segs[1].points) == 6
+
+
+def test_wheel_tip_densifies_close_to_conjugate_locus():
+    # the drawn tip (densified Bezier) tracks the true conjugate locus closely
+    inp = _valid_inputs(resolution=4)
+    geo = gm.derive_geometry(inp)
+    segs = gm.build_wheel_tooth(inp, geo)
+    dense = gm.densify_segments([segs[1]], n_spline=2000)   # fine, to measure true dev
+    locus = _wheel_tip_locus(inp)
+    worst = 0.0
+    for q in locus:
+        worst = max(worst, min(math.hypot(q[0] - d[0], q[1] - d[1]) for d in dense))
+    assert worst < 0.005                      # < 5 microns
 
 
 # ------------------------------------------------------------- bezier tip fit
@@ -269,6 +284,16 @@ def test_array_tooth_produces_n_copies():
     out = gm.array_tooth([seg], teeth=4, base_angle=0.0)
     assert len(out) == 4
     assert out[1].points[0] == pytest.approx((0.0, 10.0), abs=1e-6)
+
+
+def test_array_tooth_preserves_cpspline_degree():
+    # the Fusion layer arrays one tooth to apply base_angle before drawing, so the
+    # control-point spline's degree must survive arraying (else add() gets degree 0)
+    seg = gm.Segment('cpspline', [(1.0, 0.0), (1.0, 1.0), (2.0, 1.0), (2.0, 0.0)],
+                     degree=3)
+    out = gm.array_tooth([seg], teeth=1, base_angle=0.0)
+    assert out[0].kind == 'cpspline'
+    assert out[0].degree == 3
 
 
 def test_build_gear_pair_places_centers_for_meshing():
