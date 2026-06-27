@@ -271,10 +271,29 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
             except Exception:
                 futil.handle_error('fix lower tip spline')
             if upper_spline is not None:
+                # A curve-level symmetry is a no-op for splines; Fusion mirrors a
+                # spline by symmetry-constraining each fit point. Pair lower fit
+                # points to their mirror (across the horizontal centerline: y->-y)
+                # on the upper spline.
                 try:
-                    gc.addSymmetry(lower_spline, upper_spline, centerline)
+                    lf, uf = lower_spline.fitPoints, upper_spline.fitPoints
+                    futil.log(f'build_gear {name}: tip fit points lower={lf.count} upper={uf.count}')
+                    for i in range(lf.count):
+                        lp = lf.item(i)
+                        tx, ty = lp.geometry.x, -lp.geometry.y
+                        best, bestd = None, 1e18
+                        for j in range(uf.count):
+                            up = uf.item(j)
+                            d = math.hypot(up.geometry.x - tx, up.geometry.y - ty)
+                            if d < bestd:
+                                bestd, best = d, up
+                        if best is not None:
+                            try:
+                                gc.addSymmetry(lp, best, centerline)
+                            except Exception:
+                                futil.handle_error(f'tip fit-point symmetry {i}')
                 except Exception:
-                    futil.handle_error('mirror tip spline across centerline')
+                    futil.handle_error('mirror tip spline fit points')
 
     futil.log(f'build_gear {name}: profiles={sketch.profiles.count}')
     disk_prof, tooth_profs = _nearest_profile(sketch.profiles, cx * MM_TO_CM, cy * MM_TO_CM)
