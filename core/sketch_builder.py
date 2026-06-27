@@ -63,11 +63,16 @@ def _add_circle_diameters(sketch, cx_cm, cy_cm, items):
 
 def _constrain_flanks(sketch, flank_lines, root_circle, gcx_cm, gcy_cm, wheel,
                       centerline=None):
-    """Constrain the tooth flank lines. BOTH gears: each flank's base (the end
-    nearest the root) coincident with the root circle. WHEEL only: both flanks
-    PARALLEL to the centerline construction line, a width offset dimension between
-    them, and a length dimension on one flank with an equal constraint on the
-    other. Defensive per constraint."""
+    """Constrain the tooth flank lines.
+
+    Pinion (or no centerline): pin each flank's base (the end nearest the root)
+    coincident with the root circle.
+
+    Wheel: both flank bases coincident with the root circle; f1 parallel to the
+    centerline; f2 SYMMETRIC to f1 about the centerline (mirrors orientation and
+    offset, but NOT length, so an EQUAL constraint is also needed); a width offset
+    dimension between the flanks; and a length dimension on f1. Defensive per
+    constraint."""
     gc = sketch.geometricConstraints
     dims = sketch.sketchDimensions
 
@@ -77,31 +82,42 @@ def _constrain_flanks(sketch, flank_lines, root_circle, gcx_cm, gcy_cm, wheel,
         de = math.hypot(ep.geometry.x - gcx_cm, ep.geometry.y - gcy_cm)
         return sp if ds < de else ep
 
-    for line in flank_lines:
+    if not wheel or centerline is None or len(flank_lines) < 2:
+        for line in flank_lines:
+            try:
+                gc.addCoincident(foot_point(line), root_circle)
+            except Exception:
+                futil.handle_error('flank base coincident with root circle')
+        return
+
+    f1, f2 = flank_lines[0], flank_lines[1]
+    for f in (f1, f2):
         try:
-            gc.addCoincident(foot_point(line), root_circle)
+            gc.addCoincident(foot_point(f), root_circle)
         except Exception:
             futil.handle_error('flank base coincident with root circle')
-
-    if not wheel or len(flank_lines) < 2:
-        return
-    f1, f2 = flank_lines[0], flank_lines[1]
-    for line in (f1, f2):
-        try:
-            if centerline is not None:
-                gc.addParallel(line, centerline)
-            else:
-                gc.addHorizontal(line)
-        except Exception:
-            futil.handle_error('flank parallel/horizontal')
-    # Width: perpendicular distance between the two parallel flanks.
+    try:
+        gc.addParallel(f1, centerline)
+    except Exception:
+        futil.handle_error('flank parallel to centerline')
+    # f2 mirrors f1 about the centerline (orientation + offset)...
+    try:
+        gc.addSymmetry(f1, f2, centerline)
+    except Exception:
+        futil.handle_error('flank symmetry about centerline')
+    # ...but symmetry does NOT equalise segment length, so add equal too.
+    try:
+        gc.addEqual(f1, f2)
+    except Exception:
+        futil.handle_error('flank equal length')
+    # Width: perpendicular distance between the two flanks.
     try:
         s1, s2 = f1.startSketchPoint.geometry, f2.startSketchPoint.geometry
         wtp = adsk.core.Point3D.create((s1.x + s2.x) / 2.0, (s1.y + s2.y) / 2.0, 0.0)
         dims.addOffsetDimension(f1, f2, wtp, True)
     except Exception:
         futil.handle_error('flank width offset dimension')
-    # Length: dimension one flank; equal-constrain the other to it.
+    # Length: dimension one flank (symmetry gives the other).
     try:
         sp, ep = f1.startSketchPoint, f1.endSketchPoint
         ltp = adsk.core.Point3D.create((sp.geometry.x + ep.geometry.x) / 2.0,
@@ -110,10 +126,6 @@ def _constrain_flanks(sketch, flank_lines, root_circle, gcx_cm, gcy_cm, wheel,
             sp, ep, adsk.fusion.DimensionOrientations.AlignedDimensionOrientation, ltp, True)
     except Exception:
         futil.handle_error('flank length dimension')
-    try:
-        gc.addEqual(f1, f2)
-    except Exception:
-        futil.handle_error('flank equal')
 
 
 def _nearest_profile(profiles, cx_cm, cy_cm):
