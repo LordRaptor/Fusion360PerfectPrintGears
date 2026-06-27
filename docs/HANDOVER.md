@@ -175,24 +175,32 @@ mode — see §7). Every constraint/dimension call is wrapped in try/except + lo
 
 ## 6. NEXT — the follow-ons (not in v1)
 
-The user will start these next (collaboratively, step by step):
+**The original §6 follow-ons are all resolved — done or dropped:**
 1. ~~**Split wheel and pinion into their own components**~~ — **DONE** (branch
    `feat/placement-targeting`; see the Placement & targeting note at the top). Also done in that
    branch: selectable sketch plane / planar face, and a selectable wheel centre point.
-2. **Rotatable wheel** — **DONE** (branch `feat/wheel-rotation`; spec/plan dated 2026-06-27).
+2. ~~**Rotatable wheel**~~ — **DONE** (branch `feat/wheel-rotation`; spec/plan dated 2026-06-27).
    The blocker was the wheel tip: a *fitted* spline carries tangent/curvature handle DOF that
    only `isFixed` (absolute → non-rotatable) removes. The tip is now a **control-point (Bézier)
    spline** (`'cpspline'` segment; `fit_tip_bezier` in the engine, degree 3 = 4 control points
    ≈3 µm, degree 5 = 6) — no handle DOF, so its control points are fully constrained and the
    wheel orientation is an **angle dimension** (centerline vs a vertical reference, home 90°; a
    0° dim vs a horizontal reference is degenerate). A new **Tangent tip join** toggle opts into a
-   tangent (smoother, worse-fitting) join. `_orient_wheel(use_angle_dim=...)` keeps the plain-
-   horizontal path for the next step. Remaining for **rotate-the-arrangement**: drive that angle
-   from the dialog and rotate wheel + pinion together (the pinion phase already references the
-   line of centers).
-3. Optionally **wire phase/rotation (and maybe thickness/factors) into the dialog** as inputs.
-4. (Lower priority) the original Task 18 acceptance checklist / extrude-one-tooth checks are
-   effectively satisfied; tidy README/screenshots if desired.
+   tangent (smoother, worse-fitting) join. **Rotate-the-arrangement** (driving that angle from the
+   dialog) was **dropped** — see the `rotate-arrangement-via-free-swing-pinion` memory: it is
+   instead handled by dropping the pinion's horizontal constraint (1 free DOF the user aligns),
+   not a dialog angle input.
+3. ~~Wire phase/rotation into the dialog~~ — **dropped** (superseded by the free-swing pinion).
+4. ~~Task 18 acceptance checklist / extrude-one-tooth checks~~ — effectively satisfied.
+
+### Current work — editable, module-linked tooth width (started 2026-06-27)
+Make **tooth width an editable input** again (it is currently a read-only derived display).
+Module and tooth width become mutually linked (edit one → the other updates), with **tooth
+fraction** kept as a third editable field; all three are tied by
+`tooth_width = tooth_fraction · π · module`. The three live in a new **"Tooth sizing"**
+dialog group. Pure-engine helpers (`tooth_width_from_module`, `module_from_tooth_width`) carry
+the math; persistence and geometry are unchanged (source of truth stays module + tooth_fraction).
+Spec: `docs/superpowers/specs/2026-06-27-editable-tooth-width-design.md`.
 
 ---
 
