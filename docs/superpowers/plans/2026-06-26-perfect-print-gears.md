@@ -2,6 +2,24 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **⚠ REVISION 2026-06-27 — geometry method rebuilt and validated.**
+> The original conjugation (Task 5 envelope-by-consecutive-intersection, and the shipped
+> `method='cycloidal'` default) produced a **non-conjugate** tip (~0.22–0.41 mm interference).
+> It is **replaced** by the validated Peterson method (interference ~0, confirmed across
+> ratios 3/5/7). Changes below:
+> - **Task 3** — feature width is now *derived*; validate `TOOTH_FRACTION` instead.
+> - **Task 5** — rewritten: one kinematic model (pinion `+tau`, wheel `−tau/ratio`) +
+>   foot-of-perpendicular envelope, cross-checked against consecutive-intersection.
+> - **Task 6** — rewritten: tip as a ~4-point clamped spline with a **horizontal start-tangent**
+>   at the flank join (smooth); sharp apex; roots from the *mating* tip height + clearance.
+> - **Task 9b (NEW)** — conjugacy / interference guard in pytest (closed polygons, penetration
+>   depth, one kinematic model, **geometry-derived mesh zone**). Sanity checks alone let the
+>   wrong curve ship; a hard-coded mesh zone gives a false 0 (both happened — see §retro).
+> - **Tasks 12 & 15** — settings/UI: drop feature width as input (derived, read-only); add
+>   `TOOTH_FRACTION` (backlash knob); module default 1.5.
+> Validated reference implementation (all pass): `tmp/peterson_step1.py … peterson_step5.py`,
+> `tmp/peterson_spline.py`, `tmp/peterson_assemble.py`. See spec §4.3/§4.6 and `docs/TODO.md`.
+
 **Goal:** Build a Fusion 360 add-in that generates Steve Peterson's "Perfect Print" gear pairs as paired sketches (wheel + matching pinion) into a user-selected component.
 
 **Architecture:** A pure-Python conjugation engine (`core/gear_math.py`, no `adsk` import, unit-tested with pytest) produces plain geometric data; a thin Fusion layer (`core/sketch_builder.py`) draws that data into sketches; a command module (`commands/generateGears/entry.py`) owns the dialog, validation, and settings persistence. Engine works entirely in **millimeters**; the Fusion layer converts mm→cm at the boundary (Fusion's internal unit is cm).
@@ -344,6 +362,17 @@ git commit -m "feat(engine): gear inputs and derived geometry"
 
 ## Task 3: Input validation
 
+> **▶ REVISED 2026-06-27.** Feature width is no longer an input — it is derived
+> `feature_width_mm = TOOTH_FRACTION * π * module_mm`. `GearInputs` gains `tooth_fraction`
+> (default 0.5) and **drops** `feature_width_mm` as a direct field (expose a derived property
+> or compute in `derive_geometry`). Validation changes accordingly:
+> - replace the "feature width too large / overlap" checks (now structurally impossible) with
+>   `0 < tooth_fraction < 0.5`;
+> - keep `clearance >= 0` and `clearance < feature_width` (using the *derived* width);
+> - keep teeth-count and module checks.
+> The code block below is the original (feature-width-as-input) version — adapt it to the
+> derived model.
+
 **Files:**
 - Modify: `core/gear_math.py`
 - Test: `tests/test_gear_math.py`
@@ -519,6 +548,23 @@ git commit -m "feat(engine): 2d rotate and line-intersection helpers"
 
 ## Task 5: Conjugate wheel-tip envelope (the core algorithm)
 
+> **▶ REWRITTEN 2026-06-27 — port from `tmp/peterson_assemble.py` (validated).**
+> The original method below (rotate a horizontal reference flank, take consecutive-line
+> intersections, empirically guess signs) is **superseded** — it generated from the wrong
+> flank instant and its sanity test couldn't detect a non-conjugate result. Use instead:
+> 1. **One kinematic model** driven by a single `tau`: pinion `+tau` about `O_p`, wheel
+>    `−tau/ratio` about `O_w`. This same model is reused by the Task 9b interference test —
+>    do not introduce a second sign/phase convention anywhere.
+> 2. **Contacting flank** = the pinion top flank placed by `alpha = 2·asin(half_w/R_p)` so it
+>    meets the wheel bottom flank at `Q` on the pinion pitch circle.
+> 3. **Envelope point(tau)** = foot of perpendicular from the pitch point `P` onto the
+>    (rotated) flank line, then rotated `+tau/ratio` about `O_w`. Exact for a straight flank.
+> 4. Find `tau_join` (envelope y = −half_w) and `tau_apex` (y = 0) by scanning a **wide**
+>    tau range (`±1.5·tooth_pitch`, not ±0.6 — the crossing's tau shifts with ratio); the
+>    half-tip is the locus between them.
+> Keep `wheel_tip_halfprofile(...)` returning ordered pitch-end→apex points (the rest of the
+> engine consumes that). The function below is kept only as historical reference.
+
 This computes the half-profile of the wheel tooth tip as the envelope of the moving pinion flank. **Sign conventions for the two rotations are confirmed empirically by the test below** — if the test fails on the endpoint/monotonicity assertions, flip `wheel_dir` from `-1` to `+1` (Step 4 explains).
 
 **Files:**
@@ -641,6 +687,19 @@ git commit -m "feat(engine): conjugate wheel-tip envelope"
 ---
 
 ## Task 6: Build one wheel tooth (mirror tip, add flanks and root)
+
+> **▶ REWRITTEN 2026-06-27 — port from `tmp/peterson_assemble.py` / `tmp/peterson_spline.py`.**
+> - Tip is a **clamped cubic spline** through ~`resolution` fit points (default 4) per half,
+>   with the **start tangent horizontal at the join** (clamp `y'(join)=0`, x natural) so it
+>   leaves tangent to the straight flank — no corner. Emit the fit points **and** the
+>   horizontal start-tangent so `sketch_builder` can add a Fusion fitted spline with a tangent
+>   constraint. (Old code applied a clearance-narrowing rotation to the tip — **remove that**;
+>   backlash now comes from `TOOTH_FRACTION`, not from narrowing the wheel tip.)
+> - **Apex stays a sharp point** (printer smooths it) — do not round it.
+> - **Root radius** = `R_w − (pinion_tip_height + clearance)` (mating tip, not `1.25·module`);
+>   place the flank foot on the root circle via `sqrt(root² − half_w²)`.
+> - Flanks end at the join level (≈ pinion pitch circle), where the tip peels off.
+> The block below is the original (clearance-narrowed, fixed-root) version — adapt it.
 
 **Files:**
 - Modify: `core/gear_math.py`
@@ -992,6 +1051,45 @@ git commit -m "test(engine): Peterson 50/10 golden check and second ratio"
 
 ---
 
+## Task 9b: Conjugacy / interference guard (NEW — the critical test)
+
+> **Added 2026-06-27.** This is the test that was missing — sanity assertions let a
+> non-conjugate curve ship. Port the trustworthy interference test from
+> `tmp/peterson_assemble.py`.
+
+**Files:**
+- Test: `tests/test_gear_math.py` (or a dedicated `tests/test_interference.py`)
+- Possibly expose small helpers from `core/gear_math.py` (closed-polygon assembly).
+
+- [ ] **Step 1: Build closed gear polygons** from `build_gear_pair` output — each gear's full
+  outline plus **root-bridge arcs** between teeth (an open zig-zag makes point-in-polygon
+  garbage). Arcs sampled **through the mid point**.
+
+- [ ] **Step 2: Roll under ONE kinematic model** — the same as generation: pinion `+tau`
+  about `O_p`, wheel `−tau/ratio` about `O_w`. Build each gear in **local** coords, then a
+  **single** placement transform (no double translation). Pinion phase = `π + π/N_p` (a gap
+  faces the wheel).
+
+- [ ] **Step 3: Measure penetration DEPTH** (not nearest distance): for vertices of one gon
+  inside the other (ray-cast point-in-poly), take distance-to-boundary; max over the cycle.
+  **Restrict candidate vertices to a geometry-derived mesh zone** centered on the pitch point
+  `(R_w, 0)` and scaled by module — **never hard-code the zone** (a fixed zone gave a false 0
+  when diameters changed; catch it by checking the snug `TOOTH_FRACTION=0.5` case reports a
+  *nonzero* residual).
+
+- [ ] **Step 4: Assert** max penetration depth < tolerance (e.g. < 60 µm, comfortably above
+  the spline/sampling floor) over `±1` pinion pitch, at a realistic `TOOTH_FRACTION` (e.g.
+  0.4). Add a second ratio (e.g. 36/12 and 56/8) so the guard isn't 50/10-specific.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add tests/ core/gear_math.py
+git commit -m "test(engine): conjugacy/interference guard (penetration depth, one kinematic model)"
+```
+
+---
+
 ## Task 10: Sketch builder — draw one gear into a sketch
 
 The Fusion layer. Not unit-testable headless; verified in Task 18. Keep it dumb: it only translates engine `Segment`s into sketch curves and converts mm→cm.
@@ -1103,6 +1201,11 @@ git commit -m "feat(fusion): build both gears of a pair into a component"
 ---
 
 ## Task 12: Settings (de)serialization helper — pure and testable
+
+> **▶ REVISED 2026-06-27.** Defaults change: `module_mm` → **1.5**; **remove** the
+> feature-width input keys (`width_is_percent`, `feature_width_mm`, `feature_width_pct`) —
+> width is derived; **add** `tooth_fraction` → **0.5**. `resolution` is now the spline
+> fit-points-per-half (default 4). Keep the clearance absolute/percent keys.
 
 The save/load of dialog values to a JSON string is pure logic; split it out so it can be tested without Fusion.
 
@@ -1346,6 +1449,12 @@ Load the add-in (Utilities → Add-Ins → Scripts and Add-Ins → green **+** �
 ---
 
 ## Task 15: Dialog inputs
+
+> **▶ REVISED 2026-06-27.** Replace the feature-width input (and its abs/percent toggle) with:
+> - a **Tooth fraction** value input (default 0.5; valid `0 < f < 0.5`), and
+> - a **read-only** feature-width display (`= tooth_fraction · π · module`), updated live in
+>   `command_input_changed` as module/fraction change (use a read-only text/value input).
+> Module default → 1.5. Clearance abs/percent stays. `resolution` label → "tip spline points".
 
 **Files:**
 - Modify: `commands/generateGears/entry.py`

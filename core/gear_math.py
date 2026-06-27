@@ -1,0 +1,552 @@
+# core/gear_math.py
+"""Pure-Python Perfect Print gear geometry engine. No Fusion (adsk) imports and
+no third-party deps (no numpy) -- Fusion's bundled Python may not have them.
+
+All lengths are in millimeters. The caller (Fusion layer) converts mm -> cm.
+Coordinate frame: wheel center at origin (0,0); pinion center at (center_distance, 0).
+
+Conjugation method (validated; see docs/superpowers/specs §4.3 and tmp/peterson_*.py):
+one kinematic model drives both generation and verification -- pinion rotates +tau
+about O_p, wheel rotates -tau/ratio about O_w. The wheel tip is the locus of the
+foot of the perpendicular from the pitch point onto the straight pinion flank
+(exact for a straight flank), trimmed flank->apex and mirrored, represented as a
+clamped cubic spline that leaves the flank join horizontally (tangent).
+"""
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
+
+Point = Tuple[float, float]
+
+
+# ============================================================ data + geometry
+@dataclass
+class GearInputs:
+    wheel_teeth: int
+    pinion_teeth: int
+    module_mm: float
+    tooth_fraction: float = 0.5          # tooth width as a fraction of circular pitch
+    clearance_mm: float = 0.1            # radial tip-to-root play
+    addendum_factor: float = 1.0         # reserved (tip is conjugate-geometric)
+    dedendum_factor: float = 1.0         # scales root depth
+    resolution: int = 4                  # spline fit points per tip half
+
+
+@dataclass
+class DerivedGeometry:
+    pitch_radius_wheel: float
+    pitch_radius_pinion: float
+    center_distance: float
+    ratio: float
+    circular_pitch: float
+    feature_width_mm: float              # derived = tooth_fraction * circular_pitch
+    half_w: float
+
+
+def derive_geometry(inp: GearInputs) -> DerivedGeometry:
+    rw = inp.module_mm * inp.wheel_teeth / 2.0
+    rp = inp.module_mm * inp.pinion_teeth / 2.0
+    cp = math.pi * inp.module_mm
+    fw = inp.tooth_fraction * cp
+    return DerivedGeometry(
+        pitch_radius_wheel=rw,
+        pitch_radius_pinion=rp,
+        center_distance=rw + rp,
+        ratio=inp.wheel_teeth / inp.pinion_teeth,
+        circular_pitch=cp,
+        feature_width_mm=fw,
+        half_w=fw / 2.0,
+    )
+
+
+MIN_PINION_TEETH = 6
+
+
+def validate_inputs(inp: GearInputs) -> None:
+    """Raise ValueError with a human-readable message if inputs are unusable."""
+    if inp.pinion_teeth < MIN_PINION_TEETH:
+        raise ValueError(f"pinion teeth must be at least {MIN_PINION_TEETH}")
+    if inp.wheel_teeth < inp.pinion_teeth:
+        raise ValueError("wheel teeth must be >= pinion teeth")
+    if inp.module_mm <= 0:
+        raise ValueError("module must be greater than 0")
+    # Feature width is DERIVED from the tooth fraction, so the old "teeth overlap"
+    # case is structurally impossible; instead bound the fraction. At 0.5 the teeth
+    # exactly fill the pitch (clearance provides the gap); above 0.5 there is no gap.
+    if not (0.0 < inp.tooth_fraction <= 0.5):
+        raise ValueError("tooth fraction must be between 0 and 0.5")
+    geo = derive_geometry(inp)
+    if inp.clearance_mm < 0:
+        raise ValueError("clearance must be >= 0")
+    if inp.clearance_mm >= geo.feature_width_mm:
+        raise ValueError("clearance must be less than the feature width")
+    if geo.half_w >= geo.pitch_radius_pinion:
+        raise ValueError("feature width is too large for the pinion size")
+
+
+# ===================================================================== 2D math
+def rotate_point(p: Point, center: Point, angle: float) -> Point:
+    s, c = math.sin(angle), math.cos(angle)
+    dx, dy = p[0] - center[0], p[1] - center[1]
+    return (center[0] + c * dx - s * dy, center[1] + s * dx + c * dy)
+
+
+def line_intersection(p1: Point, p2: Point, p3: Point, p4: Point):
+    """Intersection of line(p1,p2) and line(p3,p4); None if (near) parallel."""
+    x1, y1 = p1
+    x2, y2 = p2
+    x3, y3 = p3
+    x4, y4 = p4
+    den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+    if abs(den) < 1e-12:
+        return None
+    a = x1 * y2 - y1 * x2
+    b = x3 * y4 - y3 * x4
+    px = (a * (x3 - x4) - (x1 - x2) * b) / den
+    py = (a * (y3 - y4) - (y1 - y2) * b) / den
+    return (px, py)
+
+
+def foot_of_perpendicular(pt: Point, a: Point, b: Point) -> Point:
+    """Foot of the perpendicular from pt onto the line through a, b."""
+    abx, aby = b[0] - a[0], b[1] - a[1]
+    t = ((pt[0] - a[0]) * abx + (pt[1] - a[1]) * aby) / (abx * abx + aby * aby)
+    return (a[0] + t * abx, a[1] + t * aby)
+
+
+def _norm_angle(a: float) -> float:
+    return (a + math.pi) % (2.0 * math.pi) - math.pi
+
+
+def _polar(r: float, ang: float) -> Point:
+    return (r * math.cos(ang), r * math.sin(ang))
+
+
+# ==================================================== pure-python cubic spline
+def _solve_tridiagonal(a: List[float], b: List[float], c: List[float],
+                       d: List[float]) -> List[float]:
+    """Thomas algorithm: solve a tridiagonal system (a=sub, b=diag, c=super)."""
+    n = len(d)
+    cp = [0.0] * n
+    dp = [0.0] * n
+    cp[0] = c[0] / b[0]
+    dp[0] = d[0] / b[0]
+    for i in range(1, n):
+        m = b[i] - a[i] * cp[i - 1]
+        cp[i] = c[i] / m if i < n - 1 else 0.0
+        dp[i] = (d[i] - a[i] * dp[i - 1]) / m
+    x = [0.0] * n
+    x[-1] = dp[-1]
+    for i in range(n - 2, -1, -1):
+        x[i] = dp[i] - cp[i] * x[i + 1]
+    return x
+
+
+def _spline_second_derivs(t: List[float], y: List[float],
+                          clamp_start: bool, clamp_end: bool) -> List[float]:
+    """Second derivatives for a natural/clamped cubic spline through (t, y).
+    A clamped end fixes the first derivative to 0 there (horizontal tangent);
+    a non-clamped end is natural (second derivative 0)."""
+    n = len(t)
+    if n == 2:
+        return [0.0, 0.0]
+    h = [t[i + 1] - t[i] for i in range(n - 1)]
+    a = [0.0] * n
+    b = [0.0] * n
+    c = [0.0] * n
+    d = [0.0] * n
+    for i in range(1, n - 1):
+        a[i] = h[i - 1]
+        b[i] = 2.0 * (h[i - 1] + h[i])
+        c[i] = h[i]
+        d[i] = 6.0 * ((y[i + 1] - y[i]) / h[i] - (y[i] - y[i - 1]) / h[i - 1])
+    if clamp_start:
+        b[0] = 2.0 * h[0]; c[0] = h[0]; d[0] = 6.0 * ((y[1] - y[0]) / h[0] - 0.0)
+    else:
+        b[0] = 1.0; c[0] = 0.0; d[0] = 0.0
+    if clamp_end:
+        a[-1] = h[-1]; b[-1] = 2.0 * h[-1]; d[-1] = 6.0 * (0.0 - (y[-1] - y[-2]) / h[-1])
+    else:
+        a[-1] = 0.0; b[-1] = 1.0; d[-1] = 0.0
+    return _solve_tridiagonal(a, b, c, d)
+
+
+def _eval_spline(t: List[float], y: List[float], M: List[float], tq: float) -> float:
+    # locate interval
+    lo, hi = 0, len(t) - 1
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if t[mid] <= tq:
+            lo = mid
+        else:
+            hi = mid
+    i = lo
+    h = t[i + 1] - t[i]
+    A = (t[i + 1] - tq) / h
+    B = (tq - t[i]) / h
+    return (A * y[i] + B * y[i + 1]
+            + ((A ** 3 - A) * M[i] + (B ** 3 - B) * M[i + 1]) * h * h / 6.0)
+
+
+def spline_curve(points: List[Point], clamp_start: bool, clamp_end: bool,
+                 n: int) -> List[Point]:
+    """Sample a clamped cubic spline through `points` into n+1 points. y is clamped
+    horizontal (y'=0) at clamped ends; x is always natural -> the curve leaves a
+    clamped end tangent to the horizontal (the wheel flank direction)."""
+    if len(points) < 3:
+        return list(points)
+    seg = [math.hypot(points[i + 1][0] - points[i][0],
+                      points[i + 1][1] - points[i][1]) for i in range(len(points) - 1)]
+    t = [0.0]
+    for s in seg:
+        t.append(t[-1] + s)
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    Mx = _spline_second_derivs(t, xs, False, False)
+    My = _spline_second_derivs(t, ys, clamp_start, clamp_end)
+    out = []
+    for j in range(n + 1):
+        tq = t[0] + (t[-1] - t[0]) * j / n
+        out.append((_eval_spline(t, xs, Mx, tq), _eval_spline(t, ys, My, tq)))
+    return out
+
+
+def _resample_arclength(points: List[Point], n_fit: int) -> List[Point]:
+    """Pick n_fit points equally spaced by arc length along `points` (ends incl.)."""
+    seg = [math.hypot(points[i + 1][0] - points[i][0],
+                      points[i + 1][1] - points[i][1]) for i in range(len(points) - 1)]
+    cum = [0.0]
+    for s in seg:
+        cum.append(cum[-1] + s)
+    total = cum[-1]
+    out = []
+    for k in range(n_fit):
+        target = total * k / (n_fit - 1)
+        # find interval
+        i = 0
+        while i < len(cum) - 2 and cum[i + 1] < target:
+            i += 1
+        span = cum[i + 1] - cum[i]
+        f = 0.0 if span == 0 else (target - cum[i]) / span
+        out.append((points[i][0] + f * (points[i + 1][0] - points[i][0]),
+                    points[i][1] + f * (points[i + 1][1] - points[i][1])))
+    return out
+
+
+# ============================================ wheel-tip conjugate envelope
+def _arc3_curve(p1: Point, p2: Point, p3: Point, n: int = 24) -> List[Point]:
+    """Sample the circular arc through 3 points, passing THROUGH the mid point p2."""
+    (x1, y1), (x2, y2), (x3, y3) = p1, p2, p3
+    d = 2.0 * (x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2))
+    if abs(d) < 1e-12:
+        return [p1, p2, p3]
+    cx = ((x1 ** 2 + y1 ** 2) * (y2 - y3) + (x2 ** 2 + y2 ** 2) * (y3 - y1)
+          + (x3 ** 2 + y3 ** 2) * (y1 - y2)) / d
+    cy = ((x1 ** 2 + y1 ** 2) * (x3 - x2) + (x2 ** 2 + y2 ** 2) * (x1 - x3)
+          + (x3 ** 2 + y3 ** 2) * (x2 - x1)) / d
+    r = math.hypot(x1 - cx, y1 - cy)
+    a1 = math.atan2(y1 - cy, x1 - cx)
+    a2 = math.atan2(y2 - cy, x2 - cx)
+    a3 = math.atan2(y3 - cy, x3 - cx)
+    TAU = 2.0 * math.pi
+    a2n = a1 + ((a2 - a1) % TAU)
+    a3n = a1 + ((a3 - a1) % TAU)
+    end = a3n if a2n <= a3n else a3n - TAU
+    return [(cx + r * math.cos(a1 + (end - a1) * i / n),
+             cy + r * math.sin(a1 + (end - a1) * i / n)) for i in range(n + 1)]
+
+
+def _contacting_flank(geo: DerivedGeometry) -> Tuple[Point, Point]:
+    """Two points on the contacting pinion flank (top flank) at the reference
+    instant, in world coords. The pinion tooth is placed by alpha = 2*asin(half_w/Rp)
+    so its top flank meets the wheel bottom flank at Q on the pinion pitch circle."""
+    C = geo.center_distance
+    Rp = geo.pitch_radius_pinion
+    hw = geo.half_w
+    Op = (C, 0.0)
+    xq = C - math.sqrt(Rp ** 2 - hw ** 2)
+    Q = (xq, -hw)
+    S = (xq, hw)
+    alpha = _norm_angle(math.atan2(Q[1], Q[0] - C) - math.atan2(S[1], S[0] - C))
+    p_pitch = rotate_point((xq, hw), Op, alpha)        # == Q
+    p_in = rotate_point((xq - 1.0, hw), Op, alpha)     # a second point on the line
+    return (p_pitch, p_in)
+
+
+def flank_in_wheel_frame(geo: DerivedGeometry, base: Tuple[Point, Point],
+                         tau: float) -> Tuple[Point, Point]:
+    """The contacting pinion flank at mesh parameter tau, expressed in the wheel
+    frame: rotate +tau about O_p, then +tau/ratio about O_w."""
+    Op = (geo.center_distance, 0.0)
+    Ow = (0.0, 0.0)
+    tw = tau / geo.ratio
+    p0 = rotate_point(rotate_point(base[0], Op, tau), Ow, tw)
+    p1 = rotate_point(rotate_point(base[1], Op, tau), Ow, tw)
+    return (p0, p1)
+
+
+def wheel_contact_point(geo: DerivedGeometry, base: Tuple[Point, Point],
+                        tau: float) -> Point:
+    """Wheel-tip point at parameter tau = foot of perpendicular from the pitch
+    point onto the (world) flank, carried into the wheel frame."""
+    Op = (geo.center_distance, 0.0)
+    Ow = (0.0, 0.0)
+    P = (geo.pitch_radius_wheel, 0.0)
+    l0 = rotate_point(base[0], Op, tau)
+    l1 = rotate_point(base[1], Op, tau)
+    foot = foot_of_perpendicular(P, l0, l1)
+    return rotate_point(foot, Ow, tau / geo.ratio)
+
+
+def wheel_tip_points(inp: GearInputs, geo: DerivedGeometry,
+                     samples: int = 240) -> List[Point]:
+    """Dense wheel-tip locus, ordered from the flank join (y = -half_w) up to the
+    centerline apex (y = 0), on the -y (lower) side, in wheel coords. This is the
+    exact conjugate locus (foot-of-perpendicular envelope) before splining."""
+    base = _contacting_flank(geo)
+    hw = geo.half_w
+    tooth_pitch = 2.0 * math.pi / inp.pinion_teeth
+    # scan a WIDE tau range (the crossing tau shifts with ratio)
+    N = 4000
+    lo, hi = -1.5 * tooth_pitch, 1.5 * tooth_pitch
+    prev_t = lo
+    prev_y = wheel_contact_point(geo, base, lo)[1]
+
+    def find_cross(target):
+        pt, py = lo, wheel_contact_point(geo, base, lo)[1]
+        for i in range(1, N + 1):
+            tt = lo + (hi - lo) * i / N
+            yy = wheel_contact_point(geo, base, tt)[1]
+            if (py - target) * (yy - target) <= 0 and py != yy:
+                f = (target - py) / (yy - py)
+                return pt + f * (tt - pt)
+            pt, py = tt, yy
+        return None
+
+    tau_join = find_cross(-hw)
+    tau_apex = find_cross(0.0)
+    if tau_join is None or tau_apex is None:
+        raise ValueError("could not locate wheel-tip join/apex (check inputs)")
+    pts = []
+    for i in range(samples):
+        tau = tau_join + (tau_apex - tau_join) * i / (samples - 1)
+        pts.append(wheel_contact_point(geo, base, tau))
+    pts[-1] = (pts[-1][0], 0.0)            # snap apex onto the centerline
+    return pts
+
+
+# ===================================================================== segments
+@dataclass
+class Segment:
+    kind: str                            # 'line' | 'spline' | 'arc3'
+    points: List[Point]
+    # for 'spline' tips: leave the named end tangent to the (horizontal) flank
+    clamp_start: bool = False
+    clamp_end: bool = False
+
+
+def _pinion_cap_apex_x(geo: DerivedGeometry) -> float:
+    return math.sqrt(geo.pitch_radius_pinion ** 2 - geo.half_w ** 2) + geo.half_w
+
+
+def build_wheel_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
+    """One wheel tooth centered on the +x axis, as a connected counter-clockwise
+    list of Segments: lower flank (line) -> lower tip (spline) -> upper tip
+    (spline) -> upper flank (line). The tip is the conjugate envelope as a clamped
+    spline (resolution fit points per half) that leaves each flank join horizontal.
+    The apex is a sharp point (printer smooths it)."""
+    rw = geo.pitch_radius_wheel
+    hw = geo.half_w
+    n_fit = max(3, inp.resolution)
+
+    locus = wheel_tip_points(inp, geo)
+    lower = _resample_arclength(locus, n_fit)        # join(y=-hw) -> apex(y=0)
+    # snap the endpoints exactly onto the flank level and the centerline (the
+    # tau-crossing scan lands within ~1e-7 of them)
+    lower[0] = (lower[0][0], -hw)
+    apex = (lower[-1][0], 0.0)
+    lower = lower[:-1] + [apex]
+    join_x = lower[0][0]
+    upper = [(x, -y) for (x, y) in reversed(lower)]  # apex -> join(y=+hw)
+
+    apex_x = apex[0]
+    wheel_tip_h = apex_x - rw
+    # root clears the MATING tooth's tip (pinion cap) + clearance
+    pinion_tip_h = _pinion_cap_apex_x(geo) - geo.pitch_radius_pinion
+    root_radius = rw - (pinion_tip_h + inp.clearance_mm) * inp.dedendum_factor
+    if root_radius <= hw:
+        raise ValueError("computed wheel root radius is too small; teeth too large")
+    foot_x = math.sqrt(root_radius ** 2 - hw ** 2)
+
+    segs: List[Segment] = []
+    segs.append(Segment('line', [(foot_x, -hw), (join_x, -hw)]))
+    segs.append(Segment('spline', lower, clamp_start=True))   # horizontal at join
+    segs.append(Segment('spline', upper, clamp_end=True))     # horizontal at join
+    segs.append(Segment('line', [(join_x, hw), (foot_x, hw)]))
+    return segs
+
+
+def build_pinion_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
+    """One pinion tooth centered on the +x axis: two parallel straight flanks a
+    feature-width apart ending ON the pinion pitch circle, capped by a semicircular
+    tip (radius half_w, centered just inside the pitch circle). The tip is free
+    (never contacts the wheel); only the flanks are working surfaces."""
+    rp = geo.pitch_radius_pinion
+    hw = geo.half_w
+    flank_top_x = math.sqrt(rp ** 2 - hw ** 2)       # flank ends on the pitch circle
+    cap_apex_x = flank_top_x + hw
+
+    # root clears the MATING tooth's tip (wheel apex) + clearance
+    wheel_apex_x = wheel_tip_points(inp, geo)[-1][0]
+    wheel_tip_h = wheel_apex_x - geo.pitch_radius_wheel
+    root_radius = rp - (wheel_tip_h + inp.clearance_mm) * inp.dedendum_factor
+    if root_radius <= hw:
+        raise ValueError("computed pinion root radius is too small; teeth too large")
+    foot_x = math.sqrt(root_radius ** 2 - hw ** 2)
+
+    segs: List[Segment] = []
+    segs.append(Segment('line', [(foot_x, -hw), (flank_top_x, -hw)]))
+    segs.append(Segment('arc3', [(flank_top_x, -hw), (cap_apex_x, 0.0), (flank_top_x, hw)]))
+    segs.append(Segment('line', [(flank_top_x, hw), (foot_x, hw)]))
+    return segs
+
+
+# ====================================================== arraying + assembly
+def array_tooth(tooth: List[Segment], teeth: int, base_angle: float) -> List[Segment]:
+    """Replicate one tooth `teeth` times around the origin, each rotated by the
+    tooth pitch, starting from `base_angle`."""
+    pitch = 2.0 * math.pi / teeth
+    out: List[Segment] = []
+    for k in range(teeth):
+        ang = base_angle + k * pitch
+        for seg in tooth:
+            out.append(Segment(seg.kind,
+                               [rotate_point(p, (0.0, 0.0), ang) for p in seg.points],
+                               seg.clamp_start, seg.clamp_end))
+    return out
+
+
+def close_gear_loop(tooth: List[Segment], teeth: int, base_angle: float) -> List[Segment]:
+    """Array one tooth `teeth` times and bridge adjacent teeth with arcs along the
+    root circle, producing a single closed outline."""
+    spt = len(tooth)
+    arrayed = array_tooth(tooth, teeth, base_angle)
+    out: List[Segment] = []
+    for k in range(teeth):
+        this_tooth = arrayed[k * spt:(k + 1) * spt]
+        out.extend(this_tooth)
+        end_pt = this_tooth[-1].points[-1]
+        start_next = arrayed[((k + 1) % teeth) * spt].points[0]
+        a0 = math.atan2(end_pt[1], end_pt[0])
+        a1 = math.atan2(start_next[1], start_next[0])
+        while a1 <= a0:
+            a1 += 2.0 * math.pi
+        mid = (a0 + a1) / 2.0
+        rho = math.hypot(end_pt[0], end_pt[1])
+        out.append(Segment('arc3', [end_pt, _polar(rho, mid), start_next]))
+    return out
+
+
+@dataclass
+class GearProfile:
+    role: str
+    teeth: int
+    center: Point
+    pitch_radius: float
+    root_radius: float
+    addendum_radius: float
+    segments: List[Segment]                 # all teeth, closed loop (gear-local)
+    tooth_segments: Optional[List[Segment]] = None   # ONE tooth (gear-local, +x)
+    base_angle: float = 0.0                  # orientation of tooth 0 for patterning
+
+
+@dataclass
+class GearPair:
+    wheel: GearProfile
+    pinion: GearProfile
+    center_distance: float
+    circular_pitch: float
+
+
+def _radii(segments: List[Segment]) -> Tuple[float, float]:
+    rr = [math.hypot(x, y) for s in segments for (x, y) in s.points]
+    return (min(rr), max(rr))
+
+
+def build_gear_pair(inp: GearInputs) -> GearPair:
+    validate_inputs(inp)
+    geo = derive_geometry(inp)
+
+    wheel_tooth = build_wheel_tooth(inp, geo)
+    pinion_tooth = build_pinion_tooth(inp, geo)
+
+    wheel_segs = close_gear_loop(wheel_tooth, inp.wheel_teeth, base_angle=0.0)
+    # Pinion tooth points toward the wheel (-x), offset half a pitch so a pinion
+    # tooth-GAP faces each wheel tooth.
+    pinion_half_pitch = math.pi / inp.pinion_teeth
+    pinion_segs = close_gear_loop(pinion_tooth, inp.pinion_teeth,
+                                  base_angle=math.pi + pinion_half_pitch)
+
+    w_root, w_add = _radii(wheel_segs)
+    p_root, p_add = _radii(pinion_segs)
+
+    wheel = GearProfile('wheel', inp.wheel_teeth, (0.0, 0.0),
+                        geo.pitch_radius_wheel, w_root, w_add, wheel_segs,
+                        tooth_segments=wheel_tooth, base_angle=0.0)
+    pinion = GearProfile('pinion', inp.pinion_teeth, (geo.center_distance, 0.0),
+                         geo.pitch_radius_pinion, p_root, p_add, pinion_segs,
+                         tooth_segments=pinion_tooth,
+                         base_angle=math.pi + pinion_half_pitch)
+    return GearPair(wheel, pinion, geo.center_distance, geo.circular_pitch)
+
+
+# ============================================ densify (for interference/testing)
+def densify_segments(segments: List[Segment], n_spline: int = 24,
+                     n_arc: int = 24) -> List[Point]:
+    """Flatten a connected segment list to a dense polyline (local frame). Splines
+    are reconstructed as clamped cubics (matching the emitted tangents); arcs are
+    sampled through the mid point."""
+    out: List[Point] = []
+    for s in segments:
+        if s.kind == 'line':
+            pts = list(s.points)
+        elif s.kind == 'arc3':
+            pts = _arc3_curve(s.points[0], s.points[1], s.points[2], n_arc)
+        elif s.kind == 'spline':
+            pts = spline_curve(s.points, s.clamp_start, s.clamp_end, n_spline)
+        else:
+            pts = list(s.points)
+        if out and pts and abs(out[-1][0] - pts[0][0]) < 1e-9 and abs(out[-1][1] - pts[0][1]) < 1e-9:
+            out.extend(pts[1:])
+        else:
+            out.extend(pts)
+    return out
+
+
+def closed_gear_polygon(tooth: List[Segment], teeth: int, base_angle: float,
+                        n_spline: int = 24, n_arc: int = 12) -> List[Point]:
+    """Closed dense polygon of a full gear: densify one local tooth, array it, and
+    bridge the gaps with root-circle arcs. Densifying BEFORE arraying keeps the
+    spline tangent clamp in its local (horizontal) frame."""
+    local = densify_segments(tooth, n_spline, n_arc)
+    root_r = min(math.hypot(x, y) for (x, y) in local)
+    poly: List[Point] = []
+    pitch = 2.0 * math.pi / teeth
+    for k in range(teeth):
+        ang = base_angle + k * pitch
+        this = [rotate_point(p, (0.0, 0.0), ang) for p in local]
+        poly.extend(this)
+        # bridge to next tooth start along the root circle
+        end_pt = this[-1]
+        ang_next = base_angle + ((k + 1) % teeth) * pitch
+        start_next = rotate_point(local[0], (0.0, 0.0), ang_next)
+        a0 = math.atan2(end_pt[1], end_pt[0])
+        a1 = math.atan2(start_next[1], start_next[0])
+        while a1 <= a0:
+            a1 += 2.0 * math.pi
+        for j in range(1, n_arc):
+            aa = a0 + (a1 - a0) * j / n_arc
+            poly.append(_polar(root_r, aa))
+    return poly
