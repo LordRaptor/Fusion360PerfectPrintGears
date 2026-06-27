@@ -152,9 +152,10 @@ def _nearest_profile(profiles, cx_cm, cy_cm):
     return ranked[0][1], [p for _, p in ranked[1:]]
 
 
-def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
-               thickness_mm: float, name: str,
-               lock_center: bool = False, mesh_to_pitch=None):
+def build_gear(component: adsk.fusion.Component, occurrence, profile: gear_math.GearProfile,
+               thickness_mm: float, name: str, plane,
+               lock_center: bool = False, mesh_to_pitch=None, center_point=None,
+               draw_offset=(0.0, 0.0), mesh_occ=None):
     """Sketch (root circle + one tooth) -> extrude the disk (new body) and the
     tooth (join) -> circular-pattern ONLY the tooth extrude `teeth` times about
     the root circle. Yields a single clean gear body (disk + N teeth).
@@ -163,15 +164,42 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
     picked by centroid, tooth joined onto the disk via participantBodies, no
     construction axis, no combine. (We skip its dedendum Cut -- our tooth profile
     already runs to the root.)
-    """
+
+    The gear is DRAWN at its final location, never drawn-then-moved: the lower tip
+    spline is isFixed in absolute sketch coords, so moving the centre by constraint
+    afterwards tears the tooth. `draw_offset` (mm) shifts the whole gear (used to
+    place the pinion at wheel_centre + center_distance). When `center_point` is
+    given (the wheel), the gear is drawn at the projected point instead.
+
+    Returns (sketch, pitch_circle, (cx_mm, cy_mm)) -- the centre actually used."""
     cx, cy = profile.center
+    cx, cy = cx + draw_offset[0], cy + draw_offset[1]
     th_cm = thickness_mm * MM_TO_CM
+
+    # Create the sketch in this component's context. When the target is a placed
+    # occurrence, occurrenceForCreation supplies the assembly context (the same thing
+    # Fusion does when you activate a component and sketch in the UI).
+    if occurrence is not None:
+        sketch = component.sketches.add(plane, occurrence)
+    else:
+        sketch = component.sketches.add(plane)
+    sketch.name = name
+
+    # Anchor the wheel to a picked point BEFORE drawing: project it, then draw the
+    # gear at its location (cx, cy) so the isFixed tip spline is born in place.
+    center_anchor = None
+    if lock_center and center_point is not None:
+        try:
+            center_anchor = sketch.project2([center_point], True)[0]
+            cx = center_anchor.geometry.x / MM_TO_CM
+            cy = center_anchor.geometry.y / MM_TO_CM
+        except Exception:
+            futil.handle_error('project wheel centre point')
+            center_anchor = None
+
     futil.log(f'build_gear {name}: center=({cx:.3f},{cy:.3f})mm teeth={profile.teeth} '
               f'root_r={profile.root_radius:.3f} add_r={profile.addendum_radius:.3f} '
               f'thickness={thickness_mm}mm')
-
-    sketch = component.sketches.add(component.xYConstructionPlane)
-    sketch.name = name
 
     sketch.isComputeDeferred = True
     try:
@@ -196,15 +224,20 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
     ])
 
     gc = sketch.geometricConstraints
+    # center_anchor was set above (the projected picked point) if any; otherwise the
+    # gear was drawn at the origin and we anchor its centre there.
+    if center_anchor is None:
+        center_anchor = sketch.originPoint
+
     # Constraints step 2a: make the three circles concentric.
     if lock_center:
-        # lock the common centre to the sketch origin (wheel sits at the origin)
+        # lock the common centre to the chosen anchor (origin, or the picked point)
         for c in (root_circle, pitch_circle, add_circle):
             try:
-                gc.addCoincident(c.centerSketchPoint, sketch.originPoint)
+                gc.addCoincident(c.centerSketchPoint, center_anchor)
             except Exception:
-                futil.handle_error('addCoincident(center, origin)')
-        futil.log(f'build_gear {name}: centres coincident with origin')
+                futil.handle_error('addCoincident(center, anchor)')
+        futil.log(f'build_gear {name}: centres coincident with anchor')
     else:
         # tie root + addendum centres to the pitch centre (concentric); the pitch
         # circle itself is located by the mesh tangent below
@@ -220,7 +253,16 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
     # to it (pitch circles tangent == meshing center distance).
     if mesh_to_pitch is not None:
         try:
-            ref = sketch.include(mesh_to_pitch).item(0)
+            # When the wheel lives in a different component, the pitch circle must be
+            # taken in the wheel's assembly context (a proxy) before it can be
+            # projected into this (pinion) sketch.
+            ref_pitch = mesh_to_pitch
+            if mesh_occ is not None:
+                try:
+                    ref_pitch = mesh_to_pitch.createForAssemblyContext(mesh_occ)
+                except Exception:
+                    futil.handle_error('proxy wheel pitch circle for assembly context')
+            ref = sketch.include(ref_pitch).item(0)
             # MUST be construction, else the big projected circle adds profiles and
             # breaks the extrude.
             try:
@@ -249,7 +291,7 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
     centerline.isConstruction = True
     try:
         if lock_center:
-            gc.addCoincident(centerline.startSketchPoint, sketch.originPoint)
+            gc.addCoincident(centerline.startSketchPoint, center_anchor)
         else:
             gc.addCoincident(centerline.startSketchPoint, pitch_circle.centerSketchPoint)
     except Exception:
@@ -294,11 +336,16 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
                     # VCS_SKETCH_SOLVING_FAILED) and is redundant -- the apex is
                     # already pinned (centerline-end coincident + closed tooth loop).
                     apex = lower_spline.endSketchPoint.geometry
+                    # The wheel centerline is horizontal at y = cy, so the mirror of
+                    # a point across it is (x, 2*cy - y) -- NOT (x, -y). Using -y only
+                    # works when the gear sits on the X axis; an off-origin centre
+                    # would pair the wrong upper fit point and the symmetry won't solve.
+                    cy_cm = cy * MM_TO_CM
                     for i in range(lf.count):
                         lp = lf.item(i)
                         if math.hypot(lp.geometry.x - apex.x, lp.geometry.y - apex.y) < 1e-4:
                             continue
-                        tx, ty = lp.geometry.x, -lp.geometry.y
+                        tx, ty = lp.geometry.x, 2.0 * cy_cm - lp.geometry.y
                         best, bestd = None, 1e18
                         for j in range(uf.count):
                             up = uf.item(j)
@@ -388,15 +435,43 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
     circ.add(cp_input)
 
     futil.log(f'build_gear {name}: disk+tooth extruded, pattern x{profile.teeth} done')
-    return sketch, pitch_circle
+    return sketch, pitch_circle, (cx, cy)
 
 
-def build_pair(component: adsk.fusion.Component, pair: gear_math.GearPair,
-               thickness_mm: float = 5.0) -> None:
-    """Build both gears into `component` in meshing layout. The wheel is built
-    first with its circle centres locked to the origin; the pinion then references
-    the wheel's pitch circle and is constrained tangent to it (the mesh)."""
-    _, wheel_pitch = build_gear(component, pair.wheel, thickness_mm,
-                                f'PPG Wheel {pair.wheel.teeth}T', lock_center=True)
-    build_gear(component, pair.pinion, thickness_mm,
-               f'PPG Pinion {pair.pinion.teeth}T', mesh_to_pitch=wheel_pitch)
+def build_pair(wheel_component: adsk.fusion.Component, wheel_occurrence,
+               pinion_component: adsk.fusion.Component, pinion_occurrence,
+               pair: gear_math.GearPair, thickness_mm: float = 5.0,
+               plane=None, wheel_center=None) -> None:
+    """Build the wheel and pinion into their (possibly separate) components in a
+    meshing layout. Each `*_occurrence` is the selected instance (or None for the
+    root/active component); it provides the assembly context to create the sketch in
+    that component and to proxy the wheel's pitch circle into the pinion's sketch for
+    the mesh. The wheel is built first (centre locked to the chosen point or origin);
+    the pinion then references the wheel's pitch circle tangent (the mesh).
+
+    `plane` is the shared planar entity both sketches are drawn on; defaults to the
+    ROOT XY construction plane (a root-level plane works with occurrenceForCreation
+    for both components). A selected planar FACE is converted to a coincident
+    construction plane in the root first -- sketching directly on a face drags the
+    face's edges into profile detection (fragmenting the disk, adding a leftover
+    region); a construction plane has no edges, so the gear profiles stay clean."""
+    root = wheel_component.parentDesign.rootComponent
+    if plane is None:
+        plane = root.xYConstructionPlane
+    elif isinstance(plane, adsk.fusion.BRepFace):
+        # Coincident construction plane = the face offset by zero, created in the
+        # root so it is shared/usable from both components' contexts. (Associative to
+        # the face; ConstructionPlaneInput has no setByPlanarFace.)
+        ci = root.constructionPlanes.createInput()
+        ci.setByOffset(plane, adsk.core.ValueInput.createByReal(0.0))
+        plane = root.constructionPlanes.add(ci)
+    _, wheel_pitch, wheel_xy = build_gear(wheel_component, wheel_occurrence, pair.wheel,
+                                          thickness_mm, f'PPG Wheel {pair.wheel.teeth}T',
+                                          plane, lock_center=True, center_point=wheel_center)
+    # Draw the pinion at wheel_centre + center_distance so it is born where the mesh
+    # places it (the pinion has no fixed geometry, but drawing it in place keeps the
+    # profile picker accurate and minimises solver movement). mesh_occ carries the
+    # wheel's context so its pitch circle can be proxied into the pinion sketch.
+    build_gear(pinion_component, pinion_occurrence, pair.pinion, thickness_mm,
+               f'PPG Pinion {pair.pinion.teeth}T', plane, mesh_to_pitch=wheel_pitch,
+               draw_offset=wheel_xy, mesh_occ=wheel_occurrence)
