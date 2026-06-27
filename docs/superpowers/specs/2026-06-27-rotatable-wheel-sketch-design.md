@@ -1,123 +1,124 @@
 # Rotatable wheel sketch — design
 
 **Date:** 2026-06-27
-**Status:** Approved (brainstorm); ready for implementation planning.
+**Status:** Approved (brainstorm). **Revised** mid-implementation — the original
+"constraint-only" plan hit a fundamental Fusion limitation; see "Why this changed".
 
 ## Goal
 
 Make the **wheel** sketch rotate cleanly as a rigid body, driven by a single
-editable angle dimension. This is the prerequisite for the handover §6
-"rotate-the-arrangement" feature: once the wheel's orientation is a dimension
-(not a `horizontal` constraint pinned to world X, and not an `isFixed` spline
-pinned to world coordinates), rotating the assembly becomes editing that one
-value.
+editable angle dimension — the prerequisite for the handover §6
+"rotate-the-arrangement" feature. To get there, re-represent the wheel tip with a
+curve type that can be **fully constrained relative to a movable frame** (a
+control-point spline), and add a user toggle for a tangent vs. faithful tip join.
 
-## Scope
+## Why this changed (the fitted-spline wall)
 
-- **Wheel-only, constraint-only.** The pinion already rotates cleanly (its tip
-  is a tangent arc — fully relative — and its phase is already an angular
-  dimension between its centerline and the line of centers). Nothing about the
-  pinion changes.
-- **The validated conjugate geometry is NOT touched.** This is purely a sketch
-  constraint rework. The pure engine (`core/gear_math.py`) is unchanged.
-- All changes live in `core/sketch_builder.py`.
+The original plan was constraint-only: remove `isFixed`, lock the fitted spline's
+fit points relative to the centerline, swap `horizontal` for an angle dimension.
+In Fusion testing this failed at a fundamental point: a **fitted spline carries
+per-fit-point tangent/curvature handle degrees of freedom** (`activateTangentHandle`
+/ `activateCurvatureHandle`) that fit-point constraints do **not** remove. Only
+`isFixed` removes them — and `isFixed` pins to absolute sketch coordinates, so the
+tip won't rotate. Therefore a fitted-spline tip cannot be both fully constrained
+*and* rotatable.
 
-## Background / why this is needed
+A **control-point spline** (`SketchControlPointSpline`) is defined entirely by its
+control points (the control frame) and a fixed degree — it has **no tangent/curvature
+handles**. Constrain every control point relative to the centerline frame and the
+curve is fully constrained and rotates rigidly with the frame. That is the fix.
 
-Today the wheel tip is locked with `lower_spline.isFixed = True`
-(`core/sketch_builder.py:327`), which pins the spline's fit points to absolute
-sketch coordinates. The wheel centerline is also `horizontal`
-(`core/sketch_builder.py:305`), pinning the tooth orientation to world X.
+## Approach
 
-The handover §6 #2 assumes rotation only needs to "swap that horizontal for an
-angle dimension." That is necessary but **not sufficient**: with the tip spline
-still `isFixed`, its fit points will not follow the rotating centerline, so the
-tip tears. Removing `isFixed` (and replacing what it locked with relative
-constraints) is the real work.
+Three layers, engine-first (testable) then Fusion (manual test).
 
-A second, related fact: `_draw_outline` (`core/sketch_builder.py:26`) draws each
-segment as an independent curve and does **not** add coincidence constraints
-between adjacent segment endpoints — it relies on shared coordinates, which is
-enough for profile detection but not for degrees of freedom. So `isFixed` is
-currently doing double duty: locking the spline shape **and** implicitly
-anchoring the flank-top / tip join. Removing it will expose new DOF at the joins
-too, not just at the interior fit points.
+### 1. Engine (`core/gear_math.py`) — represent the tip as a Bézier
 
-## New constraint scheme for the wheel tip
+- Add `fit_tip_bezier(locus, degree, tangent_join)`: least-squares-fit a single
+  clamped Bézier to the dense conjugate tip locus (the existing
+  `wheel_tip_points` envelope — **the conjugate math is untouched**). Endpoints are
+  clamped exactly to the flank join and the apex; interior control points are free
+  (or, with `tangent_join`, the first interior point is constrained so the curve
+  leaves the join horizontally). Returns `degree+1` control points.
+  - **degree 3 → 4 control points; degree 5 → 6 control points.** These are the
+    only degrees Fusion's `SketchControlPointSplines.add` accepts, and a single
+    Bézier of either degree has a **forced knot vector** (no interior knots), so
+    the engine's control points reproduce *exactly* in Fusion — no knot ambiguity.
+- Add Bézier evaluation helpers (`_bezier_point`, `bezier_curve`).
+- `Segment` gains a `degree` field and a new `kind = 'cpspline'` (control points
+  stored in `points`).
+- `build_wheel_tooth` emits the lower and upper tip as `'cpspline'` segments (the
+  upper is the y-mirror of the lower control points).
+- `densify_segments` evaluates `'cpspline'` via `bezier_curve`, so the interference
+  test (`closed_gear_polygon`) validates the **actual drawn shape** (unifying the
+  drawn and validated curve — previously the fitted spline and the engine clamped
+  cubic were separate approximations).
 
-Replace the two absolute anchors with relative locks:
+**Fidelity (measured against the true conjugate locus, default 50/10, m=1.5):**
 
-1. **Remove** `lower_spline.isFixed = True`.
-2. **Add the join coincidences** that `isFixed` was implicitly providing:
-   - lower-spline start ↔ lower flank top
-   - upper-spline start ↔ upper flank top
+| Tip representation | Max deviation |
+|---|---|
+| Old engine clamped-cubic (4 fit points) | 19.8 µm |
+| **4-CP Bézier, free (tangent OFF)** | **3.0 µm** |
+| 4-CP Bézier, tangent ON (horizontal at join) | 40.1 µm |
 
-   (The apex ↔ centerline-end coincidence already exists at line 323.)
-3. **Lock each interior fit point of the lower spline relative to the frame**
-   with two driving dimensions each:
-   - perpendicular distance to the centerline, and
-   - distance to the centre.
+The free fit is *more* faithful than the old representation and preserves the real
+~12° flank/tip corner (handover §3). Forcing the tangent smooths that corner and
+deviates more — hence it is an opt-in toggle, not the default.
 
-   The upper half stays mirrored by the existing per-fit-point symmetry about
-   the centerline, so locking the lower half fully determines the whole tip.
-   At the default resolution this is ~2–3 interior points → ~4–6 dimensions.
-   The dimension *values* are the computed conjugate-shape numbers (not
-   meaningful round numbers); that is acceptable.
-4. **Replace** the centerline `horizontal` with an **angular dimension** between
-   the centerline and a new horizontal construction reference line through the
-   centre. Default **0°**, which reproduces today's orientation exactly (the
-   wheel's `base_angle` is `0.0`, so tooth 0 points along +X today). Editing this
-   angle rotates the whole tooth; the existing circular pattern carries the
-   rotation to every tooth.
+### 2. Engine/inputs — the tangent toggle and degree
 
-## Acknowledged risk
+- `GearInputs` gains `tangent_join: bool = False` (default = faithful free fit).
+- Tip degree: derived from the existing `resolution` input — `degree = 3 if
+  resolution <= 4 else 5` (4 vs 6 control points). This reuses the existing knob as
+  the "number of control points" exploration lever the user asked for; default
+  `resolution = 4` → degree 3 → the validated 3 µm case.
+- `core/settings.py` (de)serializes `tangent_join`.
 
-The one "plausible-but-must-verify-in-Fusion" assumption is that locking all fit
-points (without `isFixed`) fully pins the fitted spline, including any
-end-tangent degrees of freedom. We verify this on the first build before relying
-on it. If tangent DOF remain, the fallback is to pin the end tangents explicitly
-(or, worst case, fall back to rotating the sketch plane / occurrence — the
-"Approach 2" alternative — but only if the relative-lock approach proves
-unworkable).
+### 3. Fusion (`core/sketch_builder.py`) — draw + constrain + rotate
 
-## Implementation strategy (step by step, DOF-driven)
+- `_draw_outline` draws `'cpspline'` via
+  `sketch.sketchCurves.sketchControlPointSplines.add(controlPoints, degree_enum)`
+  (`SplineDegrees.SplineDegreeThree` / `SplineDegreeFive`).
+- Wheel tip: remove `isFixed`. Constrain the lower spline's **control points**
+  relative to the centerline frame — interior control points dimensioned to the
+  centre and the apex (both on the centerline, so they rotate with it); the end
+  control points are the curve ends (Fusion auto-coincides the drawn joins; the
+  apex end is coincident to the centerline end). Mirror the upper spline's control
+  points to the lower per point by symmetry about the centerline. No handle DOF →
+  fully constrained.
+- Replace the centerline `horizontal` with an **angular dimension** between the
+  centerline and a horizontal construction reference line through the centre
+  (default 0° = today's orientation). Editing it rotates the whole wheel; the
+  circular pattern carries it to every tooth.
+- The pinion is unchanged (tangent-arc tip + existing angular phase dim).
 
-Per the project working mode (CLAUDE.md / handover §7), do not guess the DOF
-statically — let Fusion report it. Each step is one change the user tests in
-Fusion and confirms before the next.
+### 4. Dialog (`commands/generateGears/entry.py`)
 
-1. Remove `isFixed`; rebuild; read what Fusion now flags as under-constrained.
-2. Add the join coincidences; rebuild; confirm only the tip interior is loose.
-3. Add the per-fit-point relative dimensions; rebuild; confirm the tooth is rigid
-   with `horizontal` still in place.
-4. Swap `horizontal` → angular dimension (default 0°); confirm the geometry is
-   identical to today.
-5. Test rotation: set the angle to several values in Fusion; confirm the tip
-   follows without tearing.
+- Add a **"Tangent tip join"** boolean checkbox input (default unchecked),
+  persisted via settings. Wire it into the build.
 
-## Verification
+## Validation
 
-- `.venv/Scripts/python.exe -m pytest tests/ -q` stays green. The engine is
-  untouched, so all existing tests (incl. the interference guard, which is
-  geometry-only) pass unchanged. This is a regression guard, not new coverage.
-- `.venv/Scripts/python.exe -m compileall -q core` for the Fusion layer.
-- Final Fusion check: rotate the wheel through a few angles; optionally export a
-  DXF to `tmp/fusion_sketches/` and confirm with `tmp/render_dxf.py` /
-  `tmp/check_tangency.py` that the tip shape at 0° is unchanged from today.
+- `pytest tests/ -q` — engine changes are TDD'd:
+  - `fit_tip_bezier` returns `degree+1` control points; endpoints equal the locus
+    ends; deviation from the locus is < 5 µm (free) and the tangent variant leaves
+    the join horizontal.
+  - `build_wheel_tooth` emits `['line','cpspline','cpspline','line']`.
+  - **The interference guard must still pass at the noise floor** (re-run; expect
+    ≤ current, since the Bézier tracks the envelope better).
+- Fusion (manual, user): wheel builds fully constrained (no handle DOF), tip shape
+  correct; rotating via the angle dimension does not tear; the tangent toggle
+  visibly changes the join.
 
 ## Docs
 
-This is mostly internal plumbing for the next feature (rotate-the-arrangement)
-and does not yet expose a dialog input, so user-facing docs change little. Update
-`README.md` and the manifest `description` only if behavior the user sees
-changes; otherwise defer the doc update to the rotate-the-arrangement change that
-surfaces the angle in the dialog. Update `docs/HANDOVER.md` §6 to mark this
-prerequisite done.
+Update `README.md` and the manifest `description` for the new tangent toggle and
+the rotatable wheel. Update `docs/HANDOVER.md` §6.
 
-## Out of scope (future work)
+## Out of scope (future)
 
-- Exposing the rotation angle in the command dialog (part of
-  rotate-the-arrangement, handover §6 #2/#3).
-- Rotating the *whole assembly* (wheel + pinion together) — this change only
-  makes the wheel individually rotatable; the pinion phase already references the
-  line of centers, so the arrangement rotation builds on top of this.
+- Exposing the rotation angle in the dialog / rotating wheel + pinion together
+  (the rest of rotate-the-arrangement).
+- Degrees other than 3 and 5, or multi-segment tip splines (single Bézier at
+  degree 3/5 is exact in Fusion and already < 3 µm).
