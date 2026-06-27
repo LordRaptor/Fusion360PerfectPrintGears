@@ -1,0 +1,26 @@
+# This project is a Fusion 360 add-in, not a packaged Python distribution.
+# pyproject.toml exists only to configure python-semantic-release, which
+# automates versioning, the changelog, and GitHub releases from the
+# Conventional Commits history.
+#
+# The git tag (vX.Y.Z) is the source of truth for the version. On each release
+# PSR stamps that version into PerfectPrintGears.manifest, commits it to main,
+# and tags that commit -- so a source checkout always has the real version.
+
+[tool.semantic_release]
+# Keep the Fusion add-in manifest version in sync with the released tag.
+# PSR pattern-matches "version": "x.y.z" in this JSON file (extension-agnostic)
+# and auto-commits the change as part of the release commit.
+version_variables = ["PerfectPrintGears.manifest:version"]
+
+# Default parser is "conventional" (feat -> minor, fix -> patch,
+# BREAKING CHANGE -> major), which matches the existing commit history.
+commit_message = "chore(release): {version} [skip ci]"
+
+[tool.semantic_release.branches.main]
+match = "main"
+prerelease = false
+
+[tool.semantic_release.changelog.default_templates]
+changelog_file = "CHANGELOG.md"
+output_format = "md"

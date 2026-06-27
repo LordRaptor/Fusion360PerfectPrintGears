@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Tests & compile check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run unit tests
+        run: python -m pytest tests/ -q
+
+      # The Fusion layer imports `adsk`, which is unavailable outside Fusion 360,
+      # so it cannot be imported/tested here. py_compile byte-compiles it to catch
+      # syntax errors without importing it.
+      - name: Syntax-check the Fusion layer
+        run: python -m compileall -q core commands lib config.py PerfectPrintGears.py
+
+  release:
+    name: Semantic release
+    needs: test
+    runs-on: ubuntu-latest
+    # Only cut releases for pushes to main, never on pull requests.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    concurrency:
+      group: ${{ github.workflow }}-release-${{ github.ref_name }}
+      cancel-in-progress: false
+    permissions:
+      contents: write   # create the release/tag and push the version + changelog commit
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0   # PSR needs full history + tags to determine the next version
+
+      - name: Force release branch to be at workflow sha
+        run: git reset --hard ${{ github.sha }}
+
+      # Stamps the version into PerfectPrintGears.manifest, builds the changelog,
+      # commits + tags, and creates the GitHub Release. No-op when no
+      # release-worthy commits exist since the last tag.
+      - name: Python Semantic Release
+        id: release
+        uses: python-semantic-release/python-semantic-release@v10.5.3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          git_committer_name: "github-actions"
+          git_committer_email: "actions@users.noreply.github.com"
