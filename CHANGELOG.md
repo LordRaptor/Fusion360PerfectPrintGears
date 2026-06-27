@@ -2,6 +2,73 @@
 
 <!-- version list -->
 
+## v1.1.0 (2026-06-27)
+
+### Bug Fixes
+
+- **fusion**: Drop redundant second tangent on pinion cap
+  ([`1a89eb8`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/1a89eb8b037060a653b09eae7dca13f4bfc3ed44))
+
+- **fusion**: Skip degenerate symmetry on wheel tip apex
+  ([`6d2c423`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/6d2c4234ddb765ff79f2ece4474906dc3e46a566))
+
+### Chores
+
+- Stop tracking .idea/workspace.xml
+  ([`2dfad7e`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/2dfad7eb479d20b7d0d4878477feef19faa8d980))
+
+### Continuous Integration
+
+- Add GitHub Actions workflow for tests and syntax check
+  ([`2be4e6a`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/2be4e6a019d6463db167fc9c482676f5b8cfad0c))
+
+- Automate releases with python-semantic-release
+  ([`4d58b80`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/4d58b8095177426c5433cc404a01a026f877d6f4))
+
+- Bump checkout and setup-python to Node 24 versions
+  ([`be8fcd9`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/be8fcd96c7af3ded75de2efa290ac454f7e9a3cb))
+
+### Documentation
+
+- Add CHANGELOG.md backfilled from history [skip ci]
+  ([`0c80905`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/0c809057c534f120da26434229060358562bf34f))
+
+- Add CLAUDE.md, fix stale README, add credit links [skip ci]
+  ([`085ce54`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/085ce54c0cc809553f3ed1403a1187b1c9e4b264))
+
+- Instruct agents to use Conventional Commits format [skip ci]
+  ([`02e4005`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/02e400520da8f7fcef8010dc14ad1da0dd9b8de1))
+
+- Itemize v1.0.0 commits in changelog [skip ci]
+  ([`e20c7da`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/e20c7da046f8b71be7a07070c9c23bd05d440d86))
+
+- Note the gear ratio readout in the dialog
+  ([`2b59a9f`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/2b59a9f001c855681351446307a5684b7f7790f7))
+
+- Update handover with dialog readouts, 0.45 default, constraint fixes [skip ci]
+  ([`63a590a`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/63a590a31c0e9227e38bc839edf1bc2625fb2190))
+
+- **plan**: Add gear ratio readout implementation plan [skip ci]
+  ([`16de4ec`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/16de4ecd10cead98a43e9c0707e753aa55907804))
+
+- **spec**: Add gear ratio readout design [skip ci]
+  ([`44fd895`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/44fd8955e64b1face0aa41c82a9619294ffb3577))
+
+### Features
+
+- **engine**: Add format_ratio helper for dialog ratio readout
+  ([`d195c20`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/d195c20ee52afa0bbe9d5b5b9f957bb6b5c74ab7))
+
+- **fusion**: Default tooth fraction to 0.45 for meshing backlash
+  ([`8203946`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/82039469ff9f7c053401a6c629e4d3fed1433f29))
+
+- **fusion**: Show live gear ratio readout in the generate dialog
+  ([`4b165c7`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/4b165c712700a41213c5a2a05266bba71b9af954))
+
+- **fusion**: Show tooth width as a read-only text field
+  ([`e6a9c28`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/e6a9c286d61cfe49417e599259407bbdbd1bbad3))
+
+
 ## Unreleased
 
 ### Chores
