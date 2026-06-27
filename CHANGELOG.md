@@ -2,6 +2,39 @@
 
 <!-- version list -->
 
+## v1.2.0 (2026-06-27)
+
+### Continuous Integration
+
+- Trigger checks for PR #5
+  ([`d7dace5`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/d7dace5f7f793f99154099f97204f69697cd22e7))
+
+### Documentation
+
+- Document the placement inputs (components, plane, center)
+  ([`01a5381`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/01a5381e0d8b75c3d0ef75f29744668aac72e3bf))
+
+- Update handover with placement & targeting features [skip ci]
+  ([`9b4f6de`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/9b4f6de668295afd2c415efeedc5d194285bac4d))
+
+- **plan**: Add placement & targeting implementation plan [skip ci]
+  ([`a42bb7f`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/a42bb7f76188d3ba1f002322a124fbbc40631c8d))
+
+- **spec**: Add placement & targeting design [skip ci]
+  ([`9ff4a07`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/9ff4a07dcc673fa76713c13ae4582d62746b5c05))
+
+### Features
+
+- **fusion**: Build wheel and pinion into separate components
+  ([`3c9d67c`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/3c9d67ce0d9f14c9492b2052399376b7440b2d02))
+
+- **fusion**: Let the user pick the sketch plane for the gears
+  ([`96b8d9b`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/96b8d9b90d1cfba181a4636db2b653c1c55c7b78))
+
+- **fusion**: Let the user pick the wheel center point
+  ([`0ccefae`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/0ccefaeff91dbeb58f398a6df59f418626ed193e))
+
+
 ## v1.1.0 (2026-06-27)
 
 ### Bug Fixes
