@@ -5,15 +5,15 @@ _DEFAULTS = {
     "wheel_teeth": 50,
     "pinion_teeth": 10,
     "module_mm": 1.5,
-    "width_is_percent": False,
-    "feature_width_mm": 2.388,
-    "feature_width_pct": 90.0,
+    # Feature width is DERIVED (= tooth_fraction * circular pitch), not stored.
+    # tooth_fraction is the circumferential-backlash knob (< 0.5 thins the teeth).
+    "tooth_fraction": 0.5,
     "clearance_is_percent": False,
     "clearance_mm": 0.1,
     "clearance_pct": 5.0,
     "addendum_factor": 1.0,
     "dedendum_factor": 1.0,
-    "resolution": 24,
+    "resolution": 4,          # wheel-tip spline fit points per half
 }
 
 

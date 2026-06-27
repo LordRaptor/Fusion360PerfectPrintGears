@@ -1,4 +1,5 @@
 import os
+import math
 import adsk.core
 import adsk.fusion
 
@@ -67,16 +68,13 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
     inputs.addValueInput('module', 'Module (mm)', 'mm',
                          adsk.core.ValueInput.createByReal(s['module_mm'] * 0.1))
 
-    # Feature width: switchable absolute / percent.
-    wmode = inputs.addButtonRowCommandInput('widthMode', 'Tooth width mode', False)
-    wmode.listItems.add('Absolute', not s['width_is_percent'])
-    wmode.listItems.add('Percent', s['width_is_percent'])
-    fw = inputs.addValueInput('featureWidth', 'Feature width', 'mm',
-                              adsk.core.ValueInput.createByReal(s['feature_width_mm'] * 0.1))
-    fwp = inputs.addValueInput('featureWidthPct', 'Feature width %', '',
-                               adsk.core.ValueInput.createByReal(s['feature_width_pct']))
-    fw.isVisible = not s['width_is_percent']
-    fwp.isVisible = s['width_is_percent']
+    # Tooth fraction: the circumferential-backlash knob (tooth width as a fraction
+    # of the circular pitch). 0.5 = equal tooth & space; < 0.5 gives backlash.
+    inputs.addValueInput('toothFraction', 'Tooth fraction', '',
+                         adsk.core.ValueInput.createByReal(s['tooth_fraction']))
+    # Feature width is DERIVED (read-only info): tooth_fraction * pi * module.
+    fwinfo = inputs.addTextBoxCommandInput('featureWidthInfo', 'Feature width', '', 1, True)
+    fwinfo.isFullWidth = False
 
     # Clearance: switchable absolute / percent.
     cmode = inputs.addButtonRowCommandInput('clearanceMode', 'Clearance mode', False)
@@ -97,9 +95,11 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
                     adsk.core.ValueInput.createByReal(s['addendum_factor']))
     a.addValueInput('dedendumFactor', 'Dedendum factor', '',
                     adsk.core.ValueInput.createByReal(s['dedendum_factor']))
-    a.addIntegerSpinnerCommandInput('resolution', 'Resolution (steps)', 8, 200, 1, int(s['resolution']))
+    a.addIntegerSpinnerCommandInput('resolution', 'Tip spline points', 3, 40, 1, int(s['resolution']))
 
     inputs.addTextBoxCommandInput('errMsg', '', '', 2, True).isFullWidth = True
+
+    _update_feature_width_display(inputs)
 
     futil.add_handler(args.command.execute, command_execute, local_handlers=local_handlers)
     futil.add_handler(args.command.inputChanged, command_input_changed, local_handlers=local_handlers)
@@ -107,13 +107,22 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
     futil.add_handler(args.command.destroy, command_destroy, local_handlers=local_handlers)
 
 
+def _update_feature_width_display(inputs):
+    """Recompute and show the derived feature width (read-only info)."""
+    try:
+        module_mm = inputs.itemById('module').value / 0.1
+        tf = inputs.itemById('toothFraction').value
+        fw = tf * math.pi * module_mm
+        inputs.itemById('featureWidthInfo').text = f'{fw:.3f} mm'
+    except Exception:
+        pass
+
+
 def command_input_changed(args: adsk.core.InputChangedEventArgs):
     inputs = args.inputs
     changed = args.input
-    if changed.id == 'widthMode':
-        is_pct = inputs.itemById('widthMode').selectedItem.name == 'Percent'
-        inputs.itemById('featureWidth').isVisible = not is_pct
-        inputs.itemById('featureWidthPct').isVisible = is_pct
+    if changed.id in ('module', 'toothFraction'):
+        _update_feature_width_display(inputs)
     elif changed.id == 'clearanceMode':
         is_pct = inputs.itemById('clearanceMode').selectedItem.name == 'Percent'
         inputs.itemById('clearance').isVisible = not is_pct
@@ -123,14 +132,9 @@ def command_input_changed(args: adsk.core.InputChangedEventArgs):
 def _read_inputs(inputs):
     """Collect dialog values into a gear_math.GearInputs (all mm). Raises ValueError."""
     module_mm = inputs.itemById('module').value / 0.1          # cm -> mm
-    circular_pitch = 3.141592653589793 * module_mm
-
-    width_is_pct = inputs.itemById('widthMode').selectedItem.name == 'Percent'
-    feature_width_mm = settings.resolve_length(
-        width_is_pct,
-        abs_mm=inputs.itemById('featureWidth').value / 0.1,
-        pct=inputs.itemById('featureWidthPct').value,
-        basis_mm=circular_pitch)
+    tooth_fraction = inputs.itemById('toothFraction').value
+    # Feature width is derived; clearance-as-percent uses it as the basis.
+    feature_width_mm = tooth_fraction * math.pi * module_mm
 
     clr_is_pct = inputs.itemById('clearanceMode').selectedItem.name == 'Percent'
     clearance_mm = settings.resolve_length(
@@ -144,7 +148,7 @@ def _read_inputs(inputs):
         wheel_teeth=inputs.itemById('wheelTeeth').value,
         pinion_teeth=inputs.itemById('pinionTeeth').value,
         module_mm=module_mm,
-        feature_width_mm=feature_width_mm,
+        tooth_fraction=tooth_fraction,
         clearance_mm=clearance_mm,
         addendum_factor=adv.itemById('addendumFactor').value,
         dedendum_factor=adv.itemById('dedendumFactor').value,
@@ -183,9 +187,7 @@ def _persist_settings(inputs):
         'wheel_teeth': inputs.itemById('wheelTeeth').value,
         'pinion_teeth': inputs.itemById('pinionTeeth').value,
         'module_mm': inputs.itemById('module').value / 0.1,
-        'width_is_percent': inputs.itemById('widthMode').selectedItem.name == 'Percent',
-        'feature_width_mm': inputs.itemById('featureWidth').value / 0.1,
-        'feature_width_pct': inputs.itemById('featureWidthPct').value,
+        'tooth_fraction': inputs.itemById('toothFraction').value,
         'clearance_is_percent': inputs.itemById('clearanceMode').selectedItem.name == 'Percent',
         'clearance_mm': inputs.itemById('clearance').value / 0.1,
         'clearance_pct': inputs.itemById('clearancePct').value,

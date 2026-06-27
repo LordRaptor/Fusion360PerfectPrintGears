@@ -21,6 +21,16 @@ def test_from_json_fills_missing_keys():
     assert out["pinion_teeth"] == settings.defaults()["pinion_teeth"]
 
 
+def test_defaults_use_tooth_fraction_not_feature_width():
+    d = settings.defaults()
+    assert d["tooth_fraction"] == 0.5
+    assert d["module_mm"] == 1.5
+    assert d["resolution"] == 4
+    # feature width is derived, never stored
+    assert "feature_width_mm" not in d
+    assert "width_is_percent" not in d
+
+
 def test_resolve_absolute_passthrough():
     assert settings.resolve_length(False, abs_mm=2.0, pct=90.0, basis_mm=10.0) == 2.0
 
