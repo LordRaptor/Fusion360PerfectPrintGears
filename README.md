@@ -21,9 +21,14 @@ constant velocity, low friction, and prints cleanly without fine involute detail
 ## What it does
 
 - Generates a **wheel** and a matching **pinion** as **solid bodies** — each tooth is
-  extruded and circular-patterned from a fully-constrained parametric sketch.
+  extruded and circular-patterned from a parametric sketch (the wheel fully
+  constrained; the pinion left with one alignment DOF, see below).
 - Builds them in **meshing layout**: wheel at the origin, pinion at the center
   distance, pitch circles tangent.
+- Leaves the **pinion free to swing** around the wheel (its pitch stays tangent, so
+  the center distance is fixed) so you can **align it with existing features** — add
+  your own constraint (coincident to an axle point, an angle dimension, collinear to
+  an edge) to lock it where you want. A target at the wrong spacing simply won't solve.
 - Persists your last-used settings on the document and pre-fills them next run.
 
 Because the wheel tip is conjugate to one specific pinion, **every wheel/pinion

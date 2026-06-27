@@ -333,13 +333,14 @@ def build_gear(component: adsk.fusion.Component, occurrence, profile: gear_math.
             except Exception:
                 futil.handle_error('set referenced pitch circle to construction')
             gc.addTangent(pitch_circle, ref)
-            # line of centers: keep this gear's centre horizontal with the wheel's,
-            # removing the rotate-around-the-wheel DOF (-> pinion fully located).
-            try:
-                gc.addHorizontalPoints(pitch_circle.centerSketchPoint, ref.centerSketchPoint)
-            except Exception:
-                futil.handle_error('addHorizontalPoints(pinion center, wheel center)')
-            futil.log(f'build_gear {name}: pitch tangent + centre horizontal with wheel')
+            # The tangent fixes the meshing centre distance but deliberately leaves
+            # ONE DOF: the pinion can swing around the wheel on the locus of valid
+            # centres. The user adds their own constraint (coincident to an axle
+            # point, an angle dim, collinear to an edge) to align the pinion with
+            # existing features; a wrong-spacing target simply won't solve. The
+            # pinion's tooth phase is dimensioned relative to the line of centres
+            # below, so its teeth follow as it swings.
+            futil.log(f'build_gear {name}: pitch tangent (centre free to swing)')
         except Exception:
             futil.handle_error('mesh tangent to wheel pitch circle')
 
