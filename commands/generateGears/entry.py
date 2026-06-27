@@ -85,6 +85,15 @@ def _build_inputs(inputs):
     plane_sel.addSelectionFilter('PlanarFaces')
     plane_sel.setSelectionLimits(0, 1)
 
+    futil.log('build: wheelCenter')
+    ctr_sel = inputs.addSelectionInput('wheelCenter', 'Wheel center',
+                                       'Point to place the wheel center on '
+                                       '(default: the sketch origin)')
+    ctr_sel.addSelectionFilter('SketchPoints')
+    ctr_sel.addSelectionFilter('ConstructionPoints')
+    ctr_sel.addSelectionFilter('Vertices')
+    ctr_sel.setSelectionLimits(0, 1)
+
     futil.log('build: teeth')
     inputs.addIntegerSpinnerCommandInput('wheelTeeth', 'Wheel teeth', 6, 2000, 1, int(s['wheel_teeth']))
     inputs.addIntegerSpinnerCommandInput('pinionTeeth', 'Pinion teeth', 6, 2000, 1, int(s['pinion_teeth']))
@@ -237,6 +246,14 @@ def _resolve_plane(inputs):
     return None
 
 
+def _resolve_wheel_center(inputs):
+    """The selected wheel-center point entity, or None to use the sketch origin."""
+    sel = inputs.itemById('wheelCenter')
+    if sel.selectionCount == 1:
+        return sel.selection(0).entity
+    return None
+
+
 def _persist_settings(inputs):
     design = adsk.fusion.Design.cast(app.activeProduct)
     s = settings.defaults()
@@ -267,8 +284,9 @@ def command_execute(args: adsk.core.CommandEventArgs):
         pair = gear_math.build_gear_pair(gi)
         target = _resolve_target(inputs)
         plane = _resolve_plane(inputs)
+        wheel_center = _resolve_wheel_center(inputs)
         thickness_mm = inputs.itemById('thickness').value / 0.1
-        sketch_builder.build_pair(target, pair, thickness_mm, plane)
+        sketch_builder.build_pair(target, pair, thickness_mm, plane, wheel_center)
         _persist_settings(inputs)
         futil.log(f'{CMD_NAME}: generated {pair.wheel.teeth}T / {pair.pinion.teeth}T')
     except Exception:
