@@ -24,3 +24,4 @@ prerelease = false
 [tool.semantic_release.changelog.default_templates]
 changelog_file = "CHANGELOG.md"
 output_format = "md"
+mask_initial_release = false
