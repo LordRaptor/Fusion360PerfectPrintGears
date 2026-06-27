@@ -2,6 +2,48 @@
 
 <!-- version list -->
 
+## v1.4.0 (2026-06-27)
+
+### Documentation
+
+- Document control-point tip, tangent toggle, and rotatable wheel
+  ([`440f09a`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/440f09a4325f046509fcf804fe9c56b273b9154d))
+
+- Revise rotatable-wheel design to control-point spline + tangent toggle [skip ci]
+  ([`7cfd480`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/7cfd4809d9ddb1bd4f2e92c5e4f4d4993dbc75c1))
+
+- **plan**: Add rotatable wheel sketch implementation plan [skip ci]
+  ([`af7fdac`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/af7fdac93f40f50d1f5a1d9207f684e070eef2fe))
+
+- **spec**: Add rotatable wheel sketch design [skip ci]
+  ([`a747f18`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/a747f187490e2745f3cc062ac99a2270ac211087))
+
+### Features
+
+- **engine**: Add pure-python cubic/quintic Bezier fit for the wheel tip
+  ([`e0db6b6`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/e0db6b6269b30bf9cfb48014b399b80ac39243dd))
+
+- **engine**: Persist the tangent_join tip toggle in settings
+  ([`c2c90c2`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/c2c90c21c798084ef572f38cb7b8188352689929))
+
+- **engine**: Represent wheel tip as a control-point Bezier (unifies drawn+validated)
+  ([`09c2fe3`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/09c2fe3d5f0fa48f6f59e8d4f72dd682caec9510))
+
+- **fusion**: Add tangent-tip-join toggle with a low-control-point warning
+  ([`9de088b`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/9de088b989c53c74bcb976c069ddf5f857fca312))
+
+- **fusion**: Draw the wheel tip as a constrained control-point spline
+  ([`adfa7f2`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/adfa7f2c795f3b8d93efbc4c34c461bdfd0b19e5))
+
+- **fusion**: Drive wheel orientation by an angle dimension (rotatable)
+  ([`eb705a5`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/eb705a588cd6238a5154b1b5d94c9b7d84f73207))
+
+### Refactoring
+
+- **engine**: Remove dead cubic-spline tip machinery superseded by the Bezier
+  ([`037168d`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/037168d188bb9281d9d4a55c21c9f5d664a9b639))
+
+
 ## v1.3.0 (2026-06-27)
 
 ### Features
