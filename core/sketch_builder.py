@@ -68,7 +68,8 @@ def _nearest_profile(profiles, cx_cm, cy_cm):
 
 
 def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
-               thickness_mm: float, name: str):
+               thickness_mm: float, name: str,
+               lock_center: bool = False, mesh_to_pitch=None):
     """Sketch (root circle + one tooth) -> extrude the disk (new body) and the
     tooth (join) -> circular-pattern ONLY the tooth extrude `teeth` times about
     the root circle. Yields a single clean gear body (disk + N teeth).
@@ -110,6 +111,27 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
         (add_circle, profile.addendum_radius * MM_TO_CM, math.radians(135)),
     ])
 
+    gc = sketch.geometricConstraints
+    # Constraints step 2a: lock this gear's circle centres to the sketch origin.
+    if lock_center:
+        for c in (root_circle, pitch_circle, add_circle):
+            try:
+                gc.addCoincident(c.centerSketchPoint, sketch.originPoint)
+            except Exception:
+                futil.handle_error('addCoincident(center, origin)')
+        futil.log(f'build_gear {name}: centres coincident with origin')
+
+    # Constraints step 2b: locate this gear by meshing -- reference an external
+    # pitch circle (e.g. the wheel's) and make this gear's pitch circle tangent
+    # to it (pitch circles tangent == meshing center distance).
+    if mesh_to_pitch is not None:
+        try:
+            ref = sketch.include(mesh_to_pitch).item(0)
+            gc.addTangent(pitch_circle, ref)
+            futil.log(f'build_gear {name}: pitch circle tangent to referenced wheel pitch circle')
+        except Exception:
+            futil.handle_error('mesh tangent to wheel pitch circle')
+
     futil.log(f'build_gear {name}: profiles={sketch.profiles.count}')
     disk_prof, tooth_profs = _nearest_profile(sketch.profiles, cx * MM_TO_CM, cy * MM_TO_CM)
 
@@ -140,11 +162,15 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
     circ.add(cp_input)
 
     futil.log(f'build_gear {name}: disk+tooth extruded, pattern x{profile.teeth} done')
-    return sketch
+    return sketch, pitch_circle
 
 
 def build_pair(component: adsk.fusion.Component, pair: gear_math.GearPair,
                thickness_mm: float = 5.0) -> None:
-    """Build both gears into `component` in meshing layout."""
-    build_gear(component, pair.wheel, thickness_mm, f'PPG Wheel {pair.wheel.teeth}T')
-    build_gear(component, pair.pinion, thickness_mm, f'PPG Pinion {pair.pinion.teeth}T')
+    """Build both gears into `component` in meshing layout. The wheel is built
+    first with its circle centres locked to the origin; the pinion then references
+    the wheel's pitch circle and is constrained tangent to it (the mesh)."""
+    _, wheel_pitch = build_gear(component, pair.wheel, thickness_mm,
+                                f'PPG Wheel {pair.wheel.teeth}T', lock_center=True)
+    build_gear(component, pair.pinion, thickness_mm,
+               f'PPG Pinion {pair.pinion.teeth}T', mesh_to_pitch=wheel_pitch)
