@@ -24,11 +24,10 @@ def _pt(x_mm: float, y_mm: float) -> adsk.core.Point3D:
 
 
 def _draw_outline(sketch, segments, cx_mm, cy_mm):
-    """Draw a connected segment list (lines / 3-pt arcs / fitted or control-point
-    splines). Returns a list of (segment, created_curve) for downstream constraints."""
+    """Draw a connected segment list (lines / 3-pt arcs / control-point splines).
+    Returns a list of (segment, created_curve) for downstream constraints."""
     lines = sketch.sketchCurves.sketchLines
     arcs = sketch.sketchCurves.sketchArcs
-    splines = sketch.sketchCurves.sketchFittedSplines
     cpsplines = sketch.sketchCurves.sketchControlPointSplines
     drawn = []
     for seg in segments:
@@ -37,11 +36,6 @@ def _draw_outline(sketch, segments, cx_mm, cy_mm):
             ent = lines.addByTwoPoints(_pt(*pts[0]), _pt(*pts[-1]))
         elif seg.kind == 'arc3':
             ent = arcs.addByThreePoints(_pt(*pts[0]), _pt(*pts[1]), _pt(*pts[-1]))
-        elif seg.kind == 'spline':
-            coll = adsk.core.ObjectCollection.create()
-            for p in pts:
-                coll.add(_pt(*p))
-            ent = splines.add(coll)
         elif seg.kind == 'cpspline':
             # Control-point (Bezier) spline -- the control points ARE the input
             # (off-curve). No tangent handles, so it can be fully constrained and

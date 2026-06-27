@@ -10,7 +10,7 @@ one kinematic model drives both generation and verification -- pinion rotates +t
 about O_p, wheel rotates -tau/ratio about O_w. The wheel tip is the locus of the
 foot of the perpendicular from the pitch point onto the straight pinion flank
 (exact for a straight flank), trimmed flank->apex and mirrored, represented as a
-clamped cubic spline that leaves the flank join horizontally (tangent).
+control-point (Bezier) spline fitted to the envelope (see fit_tip_bezier).
 """
 from __future__ import annotations
 
@@ -132,117 +132,6 @@ def _norm_angle(a: float) -> float:
 
 def _polar(r: float, ang: float) -> Point:
     return (r * math.cos(ang), r * math.sin(ang))
-
-
-# ==================================================== pure-python cubic spline
-def _solve_tridiagonal(a: List[float], b: List[float], c: List[float],
-                       d: List[float]) -> List[float]:
-    """Thomas algorithm: solve a tridiagonal system (a=sub, b=diag, c=super)."""
-    n = len(d)
-    cp = [0.0] * n
-    dp = [0.0] * n
-    cp[0] = c[0] / b[0]
-    dp[0] = d[0] / b[0]
-    for i in range(1, n):
-        m = b[i] - a[i] * cp[i - 1]
-        cp[i] = c[i] / m if i < n - 1 else 0.0
-        dp[i] = (d[i] - a[i] * dp[i - 1]) / m
-    x = [0.0] * n
-    x[-1] = dp[-1]
-    for i in range(n - 2, -1, -1):
-        x[i] = dp[i] - cp[i] * x[i + 1]
-    return x
-
-
-def _spline_second_derivs(t: List[float], y: List[float],
-                          clamp_start: bool, clamp_end: bool) -> List[float]:
-    """Second derivatives for a natural/clamped cubic spline through (t, y).
-    A clamped end fixes the first derivative to 0 there (horizontal tangent);
-    a non-clamped end is natural (second derivative 0)."""
-    n = len(t)
-    if n == 2:
-        return [0.0, 0.0]
-    h = [t[i + 1] - t[i] for i in range(n - 1)]
-    a = [0.0] * n
-    b = [0.0] * n
-    c = [0.0] * n
-    d = [0.0] * n
-    for i in range(1, n - 1):
-        a[i] = h[i - 1]
-        b[i] = 2.0 * (h[i - 1] + h[i])
-        c[i] = h[i]
-        d[i] = 6.0 * ((y[i + 1] - y[i]) / h[i] - (y[i] - y[i - 1]) / h[i - 1])
-    if clamp_start:
-        b[0] = 2.0 * h[0]; c[0] = h[0]; d[0] = 6.0 * ((y[1] - y[0]) / h[0] - 0.0)
-    else:
-        b[0] = 1.0; c[0] = 0.0; d[0] = 0.0
-    if clamp_end:
-        a[-1] = h[-1]; b[-1] = 2.0 * h[-1]; d[-1] = 6.0 * (0.0 - (y[-1] - y[-2]) / h[-1])
-    else:
-        a[-1] = 0.0; b[-1] = 1.0; d[-1] = 0.0
-    return _solve_tridiagonal(a, b, c, d)
-
-
-def _eval_spline(t: List[float], y: List[float], M: List[float], tq: float) -> float:
-    # locate interval
-    lo, hi = 0, len(t) - 1
-    while hi - lo > 1:
-        mid = (lo + hi) // 2
-        if t[mid] <= tq:
-            lo = mid
-        else:
-            hi = mid
-    i = lo
-    h = t[i + 1] - t[i]
-    A = (t[i + 1] - tq) / h
-    B = (tq - t[i]) / h
-    return (A * y[i] + B * y[i + 1]
-            + ((A ** 3 - A) * M[i] + (B ** 3 - B) * M[i + 1]) * h * h / 6.0)
-
-
-def spline_curve(points: List[Point], clamp_start: bool, clamp_end: bool,
-                 n: int) -> List[Point]:
-    """Sample a clamped cubic spline through `points` into n+1 points. y is clamped
-    horizontal (y'=0) at clamped ends; x is always natural -> the curve leaves a
-    clamped end tangent to the horizontal (the wheel flank direction)."""
-    if len(points) < 3:
-        return list(points)
-    seg = [math.hypot(points[i + 1][0] - points[i][0],
-                      points[i + 1][1] - points[i][1]) for i in range(len(points) - 1)]
-    t = [0.0]
-    for s in seg:
-        t.append(t[-1] + s)
-    xs = [p[0] for p in points]
-    ys = [p[1] for p in points]
-    Mx = _spline_second_derivs(t, xs, False, False)
-    My = _spline_second_derivs(t, ys, clamp_start, clamp_end)
-    out = []
-    for j in range(n + 1):
-        tq = t[0] + (t[-1] - t[0]) * j / n
-        out.append((_eval_spline(t, xs, Mx, tq), _eval_spline(t, ys, My, tq)))
-    return out
-
-
-def _resample_arclength(points: List[Point], n_fit: int) -> List[Point]:
-    """Pick n_fit points equally spaced by arc length along `points` (ends incl.)."""
-    seg = [math.hypot(points[i + 1][0] - points[i][0],
-                      points[i + 1][1] - points[i][1]) for i in range(len(points) - 1)]
-    cum = [0.0]
-    for s in seg:
-        cum.append(cum[-1] + s)
-    total = cum[-1]
-    out = []
-    for k in range(n_fit):
-        target = total * k / (n_fit - 1)
-        # find interval
-        i = 0
-        while i < len(cum) - 2 and cum[i + 1] < target:
-            i += 1
-        span = cum[i + 1] - cum[i]
-        f = 0.0 if span == 0 else (target - cum[i]) / span
-        out.append((points[i][0] + f * (points[i + 1][0] - points[i][0]),
-                    points[i][1] + f * (points[i + 1][1] - points[i][1])))
-    return out
 
 
 # ============================================================= bezier (tip)
@@ -463,11 +352,8 @@ def wheel_tip_points(inp: GearInputs, geo: DerivedGeometry,
 # ===================================================================== segments
 @dataclass
 class Segment:
-    kind: str                            # 'line' | 'spline' | 'arc3' | 'cpspline'
+    kind: str                            # 'line' | 'arc3' | 'cpspline'
     points: List[Point]                  # for 'cpspline': the Bezier control points
-    # for 'spline' tips: leave the named end tangent to the (horizontal) flank
-    clamp_start: bool = False
-    clamp_end: bool = False
     degree: int = 0                      # for 'cpspline': Bezier degree (3 or 5)
 
 
@@ -550,7 +436,7 @@ def array_tooth(tooth: List[Segment], teeth: int, base_angle: float) -> List[Seg
         for seg in tooth:
             out.append(Segment(seg.kind,
                                [rotate_point(p, (0.0, 0.0), ang) for p in seg.points],
-                               seg.clamp_start, seg.clamp_end, seg.degree))
+                               seg.degree))
     return out
 
 
@@ -631,17 +517,14 @@ def build_gear_pair(inp: GearInputs) -> GearPair:
 # ============================================ densify (for interference/testing)
 def densify_segments(segments: List[Segment], n_spline: int = 24,
                      n_arc: int = 24) -> List[Point]:
-    """Flatten a connected segment list to a dense polyline (local frame). Splines
-    are reconstructed as clamped cubics (matching the emitted tangents); arcs are
-    sampled through the mid point."""
+    """Flatten a connected segment list to a dense polyline (local frame). Control-
+    point splines are evaluated as Beziers; arcs are sampled through the mid point."""
     out: List[Point] = []
     for s in segments:
         if s.kind == 'line':
             pts = list(s.points)
         elif s.kind == 'arc3':
             pts = _arc3_curve(s.points[0], s.points[1], s.points[2], n_arc)
-        elif s.kind == 'spline':
-            pts = spline_curve(s.points, s.clamp_start, s.clamp_end, n_spline)
         elif s.kind == 'cpspline':
             pts = bezier_curve(s.points, n_spline)
         else:
