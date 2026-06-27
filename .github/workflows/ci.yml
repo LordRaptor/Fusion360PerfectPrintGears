@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Tests & compile check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run unit tests
+        run: python -m pytest tests/ -q
+
+      # The Fusion layer imports `adsk`, which is unavailable outside Fusion 360,
+      # so it cannot be imported/tested here. py_compile byte-compiles it to catch
+      # syntax errors without importing it.
+      - name: Syntax-check the Fusion layer
+        run: python -m compileall -q core commands lib config.py PerfectPrintGears.py

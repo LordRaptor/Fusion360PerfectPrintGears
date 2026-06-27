@@ -1,0 +1,5 @@
+# Development / CI dependencies.
+# The Fusion add-in itself runs on Fusion 360's bundled Python and the `adsk`
+# package, which is only available inside Fusion. These are the deps needed to
+# run the pure-Python test suite and tooling outside of Fusion.
+pytest>=8.0
