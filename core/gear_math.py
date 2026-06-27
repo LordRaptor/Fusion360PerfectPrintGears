@@ -244,6 +244,119 @@ def _resample_arclength(points: List[Point], n_fit: int) -> List[Point]:
     return out
 
 
+# ============================================================= bezier (tip)
+# A control-point (Bezier) spline represents the wheel tip in the sketch: unlike a
+# fitted spline it has no per-point tangent handles, so constraining every control
+# point fully constrains it -- which lets the tip rotate with the centerline frame.
+# Fusion only accepts degree 3 (4 control points) or 5 (6); a single Bezier of
+# either degree has a forced knot vector, so engine control points reproduce
+# exactly in Fusion. Pure Python (no numpy): Fusion does not bundle it.
+def _binom(n: int, k: int) -> float:
+    c = 1.0
+    for i in range(k):
+        c = c * (n - i) / (i + 1)
+    return c
+
+
+def _bernstein(degree: int, i: int, t: float) -> float:
+    return _binom(degree, i) * (t ** i) * ((1.0 - t) ** (degree - i))
+
+
+def _bezier_point(ctrl: List[Point], t: float) -> Point:
+    d = len(ctrl) - 1
+    x = y = 0.0
+    for i, (px, py) in enumerate(ctrl):
+        b = _bernstein(d, i, t)
+        x += b * px
+        y += b * py
+    return (x, y)
+
+
+def bezier_curve(ctrl: List[Point], n: int = 24) -> List[Point]:
+    """Sample a Bezier defined by `ctrl` into n+1 points over t in [0, 1]."""
+    return [_bezier_point(ctrl, k / n) for k in range(n + 1)]
+
+
+def _solve_linear(A: List[List[float]], b: List[float]) -> List[float]:
+    """Solve A x = b for a small square system (Gaussian elimination, partial
+    pivot). Pure Python -- the tip fit is at most 4x4."""
+    n = len(b)
+    M = [row[:] + [b[i]] for i, row in enumerate(A)]
+    for col in range(n):
+        piv = max(range(col, n), key=lambda r: abs(M[r][col]))
+        M[col], M[piv] = M[piv], M[col]
+        pv = M[col][col]
+        for r in range(n):
+            if r != col and M[r][col] != 0.0:
+                f = M[r][col] / pv
+                for c in range(col, n + 1):
+                    M[r][c] -= f * M[col][c]
+    return [M[i][n] / M[i][i] for i in range(n)]
+
+
+def _chord_params(pts: List[Point]) -> List[float]:
+    d = [0.0]
+    for i in range(1, len(pts)):
+        d.append(d[-1] + math.hypot(pts[i][0] - pts[i - 1][0],
+                                    pts[i][1] - pts[i - 1][1]))
+    total = d[-1] or 1.0
+    return [x / total for x in d]
+
+
+def _fit_bezier_coord(locus: List[Point], t: List[float], coord: int, degree: int,
+                      p0c: float, pdc: float, fixed_interior: dict) -> List[float]:
+    """Least-squares-fit the interior control-point values (indices 1..degree-1)
+    for one coordinate, with the endpoints (0, degree) and any `fixed_interior`
+    indices held fixed. Returns values for all interior indices 1..degree-1."""
+    free = [i for i in range(1, degree) if i not in fixed_interior]
+    rows = []
+    rhs = []
+    # Build basis (M) and residual (target minus fixed contributions) per sample.
+    basis = []
+    res = []
+    for tk, q in zip(t, locus):
+        fixed_sum = (_bernstein(degree, 0, tk) * p0c
+                     + _bernstein(degree, degree, tk) * pdc)
+        for i, v in fixed_interior.items():
+            fixed_sum += _bernstein(degree, i, tk) * v
+        basis.append([_bernstein(degree, i, tk) for i in free])
+        res.append(q[coord] - fixed_sum)
+    # Normal equations (M^T M) x = M^T res.
+    m = len(free)
+    A = [[0.0] * m for _ in range(m)]
+    b = [0.0] * m
+    for k in range(len(t)):
+        bk = basis[k]
+        rk = res[k]
+        for a in range(m):
+            b[a] += bk[a] * rk
+            for c in range(m):
+                A[a][c] += bk[a] * bk[c]
+    sol = _solve_linear(A, b) if m else []
+    result = dict(fixed_interior)
+    for j, i in enumerate(free):
+        result[i] = sol[j]
+    return [result[i] for i in range(1, degree)]
+
+
+def fit_tip_bezier(locus: List[Point], degree: int = 3,
+                   tangent_join: bool = False) -> List[Point]:
+    """Least-squares-fit a single clamped Bezier of `degree` (3 or 5) to the dense
+    conjugate tip `locus`. Endpoints are clamped to locus[0] (flank join) and
+    locus[-1] (apex); interior control points are free. With `tangent_join`, the
+    first interior control point shares the join's y so the curve leaves the join
+    horizontally (tangent to the flank) -- smoother but a worse envelope fit.
+    Returns degree+1 control points."""
+    if degree not in (3, 5):
+        raise ValueError("tip Bezier degree must be 3 or 5 (Fusion limitation)")
+    P0, Pd = locus[0], locus[-1]
+    t = _chord_params(locus)
+    xs = _fit_bezier_coord(locus, t, 0, degree, P0[0], Pd[0], {})
+    fixed_y = {1: P0[1]} if tangent_join else {}
+    ys = _fit_bezier_coord(locus, t, 1, degree, P0[1], Pd[1], fixed_y)
+    return [P0] + [(xs[i], ys[i]) for i in range(degree - 1)] + [Pd]
+
+
 # ============================================ wheel-tip conjugate envelope
 def _arc3_curve(p1: Point, p2: Point, p3: Point, n: int = 24) -> List[Point]:
     """Sample the circular arc through 3 points, passing THROUGH the mid point p2."""

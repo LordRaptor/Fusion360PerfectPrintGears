@@ -176,6 +176,73 @@ def test_wheel_tooth_resolution_controls_fit_points():
     assert len(segs[1].points) == 6           # fit points per tip half
 
 
+# ------------------------------------------------------------- bezier tip fit
+def test_bezier_point_endpoints_and_cubic_midpoint():
+    ctrl = [(0.0, 0.0), (0.0, 1.0), (1.0, 1.0), (1.0, 0.0)]
+    assert gm._bezier_point(ctrl, 0.0) == pytest.approx((0.0, 0.0))
+    assert gm._bezier_point(ctrl, 1.0) == pytest.approx((1.0, 0.0))
+    # cubic at t=0.5 == (P0 + 3P1 + 3P2 + P3)/8
+    assert gm._bezier_point(ctrl, 0.5) == pytest.approx((0.5, 0.75))
+
+
+def test_bezier_curve_samples_n_plus_one_points():
+    ctrl = [(0.0, 0.0), (1.0, 1.0), (2.0, 0.0)]      # degree 2
+    pts = gm.bezier_curve(ctrl, 10)
+    assert len(pts) == 11
+    assert pts[0] == pytest.approx((0.0, 0.0))
+    assert pts[-1] == pytest.approx((2.0, 0.0))
+
+
+def _wheel_tip_locus(inp):
+    geo = gm.derive_geometry(inp)
+    locus = gm.wheel_tip_points(inp, geo)
+    hw = geo.half_w
+    locus[0] = (locus[0][0], -hw)
+    locus[-1] = (locus[-1][0], 0.0)
+    return locus
+
+
+def _max_dev_from_locus(ctrl, locus):
+    fine = gm.bezier_curve(ctrl, 2000)
+    worst = 0.0
+    for q in locus:
+        worst = max(worst, min(math.hypot(q[0] - f[0], q[1] - f[1]) for f in fine))
+    return worst
+
+
+def test_fit_tip_bezier_degree3_tracks_locus_within_5um():
+    inp = _valid_inputs(resolution=4)
+    locus = _wheel_tip_locus(inp)
+    ctrl = gm.fit_tip_bezier(locus, degree=3, tangent_join=False)
+    assert len(ctrl) == 4
+    assert ctrl[0] == pytest.approx(locus[0], abs=1e-12)
+    assert ctrl[-1] == pytest.approx(locus[-1], abs=1e-12)
+    assert _max_dev_from_locus(ctrl, locus) < 0.005      # < 5 microns
+
+
+def test_fit_tip_bezier_degree5_has_six_points_and_tracks_tightly():
+    inp = _valid_inputs(resolution=6)
+    locus = _wheel_tip_locus(inp)
+    ctrl = gm.fit_tip_bezier(locus, degree=5, tangent_join=False)
+    assert len(ctrl) == 6
+    assert _max_dev_from_locus(ctrl, locus) < 0.005
+
+
+def test_fit_tip_bezier_tangent_join_leaves_join_horizontal():
+    inp = _valid_inputs(resolution=4)
+    locus = _wheel_tip_locus(inp)
+    ctrl = gm.fit_tip_bezier(locus, degree=3, tangent_join=True)
+    # horizontal leave at the join: control point 1 shares the join's y
+    assert ctrl[1][1] == pytest.approx(ctrl[0][1], abs=1e-12)
+
+
+def test_fit_tip_bezier_rejects_unsupported_degree():
+    inp = _valid_inputs()
+    locus = _wheel_tip_locus(inp)
+    with pytest.raises(ValueError):
+        gm.fit_tip_bezier(locus, degree=4)
+
+
 # ---------------------------------------------------------------- pinion tooth
 def test_pinion_tooth_arc_tip_and_constant_width_flanks():
     inp = _valid_inputs()
