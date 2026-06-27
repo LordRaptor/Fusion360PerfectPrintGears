@@ -150,7 +150,10 @@ def _build_inputs(inputs):
                     adsk.core.ValueInput.createByReal(s['addendum_factor']))
     a.addValueInput('dedendumFactor', 'Dedendum factor', '',
                     adsk.core.ValueInput.createByReal(s['dedendum_factor']))
-    a.addIntegerSpinnerCommandInput('resolution', 'Tip spline points', 3, 40, 1, int(s['resolution']))
+    a.addIntegerSpinnerCommandInput('resolution', 'Tip control points', 4, 6, 1, int(s['resolution']))
+    tj = a.addBoolValueInput('tangentJoin', 'Tangent tip join', True, '', bool(s['tangent_join']))
+    tj.tooltip = ('Make the tip leave the flank join tangent (smoother) instead of '
+                  'the faithful conjugate corner. Tangent fits the envelope less well.')
 
     futil.log('build: errMsg')
     inputs.addTextBoxCommandInput('errMsg', '', '', 2, True).isFullWidth = True
@@ -219,6 +222,7 @@ def _read_inputs(inputs):
         addendum_factor=adv.itemById('addendumFactor').value,
         dedendum_factor=adv.itemById('dedendumFactor').value,
         resolution=adv.itemById('resolution').value,
+        tangent_join=adv.itemById('tangentJoin').value,
     )
 
 
@@ -228,7 +232,14 @@ def command_validate(args: adsk.core.ValidateInputsEventArgs):
     try:
         gi = _read_inputs(inputs)
         gear_math.validate_inputs(gi)
-        err.text = ''
+        # Non-blocking warning: a tangent join needs more than a single cubic to fit
+        # the conjugate tip well (4 control points -> degree 3). Still allow it.
+        adv = inputs.itemById('advanced').children
+        if adv.itemById('tangentJoin').value and adv.itemById('resolution').value < 5:
+            err.text = ('Tangent tip join fits poorly with 4 control points; '
+                        '5 or more recommended.')
+        else:
+            err.text = ''
         args.areInputsValid = True
     except ValueError as e:
         err.text = str(e)
@@ -281,6 +292,7 @@ def _persist_settings(inputs):
         'addendum_factor': inputs.itemById('advanced').children.itemById('addendumFactor').value,
         'dedendum_factor': inputs.itemById('advanced').children.itemById('dedendumFactor').value,
         'resolution': inputs.itemById('advanced').children.itemById('resolution').value,
+        'tangent_join': inputs.itemById('advanced').children.itemById('tangentJoin').value,
     })
     attr = design.attributes.itemByName(ATTR_GROUP, ATTR_NAME)
     if attr:
