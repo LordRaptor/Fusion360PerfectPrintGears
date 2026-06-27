@@ -289,8 +289,15 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
                 try:
                     lf, uf = lower_spline.fitPoints, upper_spline.fitPoints
                     futil.log(f'build_gear {name}: tip fit points lower={lf.count} upper={uf.count}')
+                    # The apex fit point lies on the centerline, so its mirror is
+                    # itself: a symmetry constraint there is degenerate (it throws
+                    # VCS_SKETCH_SOLVING_FAILED) and is redundant -- the apex is
+                    # already pinned (centerline-end coincident + closed tooth loop).
+                    apex = lower_spline.endSketchPoint.geometry
                     for i in range(lf.count):
                         lp = lf.item(i)
+                        if math.hypot(lp.geometry.x - apex.x, lp.geometry.y - apex.y) < 1e-4:
+                            continue
                         tx, ty = lp.geometry.x, -lp.geometry.y
                         best, bestd = None, 1e18
                         for j in range(uf.count):
