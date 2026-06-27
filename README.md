@@ -58,10 +58,11 @@ Open **Solid → Create → Generate Perfect Print Gears** and set:
 | **Wheel center** *(optional)* | Point (sketch point, construction point, or vertex) to place the wheel center on (defaults to the sketch origin). The pinion meshes relative to the wheel. |
 | **Wheel teeth / Pinion teeth** | Tooth counts (pinion ≥ 6, wheel ≥ pinion). |
 | **Gear ratio** *(read-only)* | Displays the resulting ratio as a decimal and reduced integer form, e.g. `3.33 : 1 (10 : 3)`. Updates live as tooth counts change. |
-| **Module (mm)** | Sets the tooth size / pitch. `circular pitch = π · module`. |
-| **Tooth fraction** | Tooth width as a fraction of the circular pitch (0–0.5). **This is the backlash knob:** 0.5 = equal tooth and space; below 0.5 thins the teeth for circumferential play. The resulting **tooth width** is shown read-only. |
+| **Tooth sizing → Module (mm)** | Sets the tooth size / pitch. `circular pitch = π · module`. Mutually linked with tooth width (editing one updates the other). |
+| **Tooth sizing → Tooth width (mm)** | The physical tooth width — **editable and mutually linked with module**. Editing it back-solves the module at the current tooth fraction (`module = tooth_width / (tooth_fraction · π)`); editing module or tooth fraction recomputes it (`tooth_width = tooth_fraction · π · module`). Lets you dial in a specific width for 3D printing. |
+| **Tooth sizing → Tooth fraction** | Tooth width as a fraction of the circular pitch (0–0.5). **This is the backlash knob:** 0.5 = equal tooth and space; below 0.5 thins the teeth for circumferential play. Editing it recomputes tooth width (module pinned). |
 | **Clearance** | Radial tip-to-root play (absolute mm or % of tooth width). Independent of tooth fraction. |
-| **Advanced → Addendum / Dedendum factor** | Optional root-depth scaling. |
+| **Advanced → Dedendum factor** | Optional root-depth scaling. |
 | **Advanced → Tip control points** | Control points per wheel-tip half: **4** (degree-3 Bézier, default) or **5–6** (degree-5). The tip is a control-point spline, so it is fully constrained and the wheel can be rotated by editing its orientation dimension. |
 | **Advanced → Tangent tip join** | Make the tip leave the flank join **tangent** (smoother) instead of the faithful conjugate corner. Fits the envelope less well — a warning recommends 5+ control points when this is enabled. |
 

@@ -13,7 +13,6 @@ _DEFAULTS = {
     "clearance_mm": 0.1,
     "clearance_pct": 5.0,
     "thickness_mm": 5.0,          # extrude depth
-    "addendum_factor": 1.0,
     "dedendum_factor": 1.0,
     "resolution": 4,          # wheel-tip Bezier: <=4 -> degree 3, else degree 5
     "tangent_join": False,    # tip leaves the flank join tangent (smoother, worse fit)
