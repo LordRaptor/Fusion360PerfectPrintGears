@@ -31,6 +31,12 @@ def test_defaults_use_tooth_fraction_not_feature_width():
     assert "width_is_percent" not in d
 
 
+def test_tangent_join_default_and_roundtrip():
+    assert settings.defaults()["tangent_join"] is False
+    back = settings.from_json(settings.to_json({"tangent_join": True}))
+    assert back["tangent_join"] is True
+
+
 def test_resolve_absolute_passthrough():
     assert settings.resolve_length(False, abs_mm=2.0, pct=90.0, basis_mm=10.0) == 2.0
 

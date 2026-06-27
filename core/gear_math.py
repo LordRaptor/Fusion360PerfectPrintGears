@@ -10,7 +10,7 @@ one kinematic model drives both generation and verification -- pinion rotates +t
 about O_p, wheel rotates -tau/ratio about O_w. The wheel tip is the locus of the
 foot of the perpendicular from the pitch point onto the straight pinion flank
 (exact for a straight flank), trimmed flank->apex and mirrored, represented as a
-clamped cubic spline that leaves the flank join horizontally (tangent).
+control-point (Bezier) spline fitted to the envelope (see fit_tip_bezier).
 """
 from __future__ import annotations
 
@@ -31,7 +31,8 @@ class GearInputs:
     clearance_mm: float = 0.1            # radial tip-to-root play
     addendum_factor: float = 1.0         # reserved (tip is conjugate-geometric)
     dedendum_factor: float = 1.0         # scales root depth
-    resolution: int = 4                  # spline fit points per tip half
+    resolution: int = 4                  # tip control points: <=4 -> degree 3, else degree 5
+    tangent_join: bool = False           # tip leaves the flank join tangent (smoother, worse fit)
 
 
 @dataclass
@@ -133,115 +134,117 @@ def _polar(r: float, ang: float) -> Point:
     return (r * math.cos(ang), r * math.sin(ang))
 
 
-# ==================================================== pure-python cubic spline
-def _solve_tridiagonal(a: List[float], b: List[float], c: List[float],
-                       d: List[float]) -> List[float]:
-    """Thomas algorithm: solve a tridiagonal system (a=sub, b=diag, c=super)."""
-    n = len(d)
-    cp = [0.0] * n
-    dp = [0.0] * n
-    cp[0] = c[0] / b[0]
-    dp[0] = d[0] / b[0]
-    for i in range(1, n):
-        m = b[i] - a[i] * cp[i - 1]
-        cp[i] = c[i] / m if i < n - 1 else 0.0
-        dp[i] = (d[i] - a[i] * dp[i - 1]) / m
-    x = [0.0] * n
-    x[-1] = dp[-1]
-    for i in range(n - 2, -1, -1):
-        x[i] = dp[i] - cp[i] * x[i + 1]
-    return x
+# ============================================================= bezier (tip)
+# A control-point (Bezier) spline represents the wheel tip in the sketch: unlike a
+# fitted spline it has no per-point tangent handles, so constraining every control
+# point fully constrains it -- which lets the tip rotate with the centerline frame.
+# Fusion only accepts degree 3 (4 control points) or 5 (6); a single Bezier of
+# either degree has a forced knot vector, so engine control points reproduce
+# exactly in Fusion. Pure Python (no numpy): Fusion does not bundle it.
+def _binom(n: int, k: int) -> float:
+    c = 1.0
+    for i in range(k):
+        c = c * (n - i) / (i + 1)
+    return c
 
 
-def _spline_second_derivs(t: List[float], y: List[float],
-                          clamp_start: bool, clamp_end: bool) -> List[float]:
-    """Second derivatives for a natural/clamped cubic spline through (t, y).
-    A clamped end fixes the first derivative to 0 there (horizontal tangent);
-    a non-clamped end is natural (second derivative 0)."""
-    n = len(t)
-    if n == 2:
-        return [0.0, 0.0]
-    h = [t[i + 1] - t[i] for i in range(n - 1)]
-    a = [0.0] * n
-    b = [0.0] * n
-    c = [0.0] * n
-    d = [0.0] * n
-    for i in range(1, n - 1):
-        a[i] = h[i - 1]
-        b[i] = 2.0 * (h[i - 1] + h[i])
-        c[i] = h[i]
-        d[i] = 6.0 * ((y[i + 1] - y[i]) / h[i] - (y[i] - y[i - 1]) / h[i - 1])
-    if clamp_start:
-        b[0] = 2.0 * h[0]; c[0] = h[0]; d[0] = 6.0 * ((y[1] - y[0]) / h[0] - 0.0)
-    else:
-        b[0] = 1.0; c[0] = 0.0; d[0] = 0.0
-    if clamp_end:
-        a[-1] = h[-1]; b[-1] = 2.0 * h[-1]; d[-1] = 6.0 * (0.0 - (y[-1] - y[-2]) / h[-1])
-    else:
-        a[-1] = 0.0; b[-1] = 1.0; d[-1] = 0.0
-    return _solve_tridiagonal(a, b, c, d)
+def _bernstein(degree: int, i: int, t: float) -> float:
+    return _binom(degree, i) * (t ** i) * ((1.0 - t) ** (degree - i))
 
 
-def _eval_spline(t: List[float], y: List[float], M: List[float], tq: float) -> float:
-    # locate interval
-    lo, hi = 0, len(t) - 1
-    while hi - lo > 1:
-        mid = (lo + hi) // 2
-        if t[mid] <= tq:
-            lo = mid
-        else:
-            hi = mid
-    i = lo
-    h = t[i + 1] - t[i]
-    A = (t[i + 1] - tq) / h
-    B = (tq - t[i]) / h
-    return (A * y[i] + B * y[i + 1]
-            + ((A ** 3 - A) * M[i] + (B ** 3 - B) * M[i + 1]) * h * h / 6.0)
+def _bezier_point(ctrl: List[Point], t: float) -> Point:
+    d = len(ctrl) - 1
+    x = y = 0.0
+    for i, (px, py) in enumerate(ctrl):
+        b = _bernstein(d, i, t)
+        x += b * px
+        y += b * py
+    return (x, y)
 
 
-def spline_curve(points: List[Point], clamp_start: bool, clamp_end: bool,
-                 n: int) -> List[Point]:
-    """Sample a clamped cubic spline through `points` into n+1 points. y is clamped
-    horizontal (y'=0) at clamped ends; x is always natural -> the curve leaves a
-    clamped end tangent to the horizontal (the wheel flank direction)."""
-    if len(points) < 3:
-        return list(points)
-    seg = [math.hypot(points[i + 1][0] - points[i][0],
-                      points[i + 1][1] - points[i][1]) for i in range(len(points) - 1)]
-    t = [0.0]
-    for s in seg:
-        t.append(t[-1] + s)
-    xs = [p[0] for p in points]
-    ys = [p[1] for p in points]
-    Mx = _spline_second_derivs(t, xs, False, False)
-    My = _spline_second_derivs(t, ys, clamp_start, clamp_end)
-    out = []
-    for j in range(n + 1):
-        tq = t[0] + (t[-1] - t[0]) * j / n
-        out.append((_eval_spline(t, xs, Mx, tq), _eval_spline(t, ys, My, tq)))
-    return out
+def bezier_curve(ctrl: List[Point], n: int = 24) -> List[Point]:
+    """Sample a Bezier defined by `ctrl` into n+1 points over t in [0, 1]."""
+    return [_bezier_point(ctrl, k / n) for k in range(n + 1)]
 
 
-def _resample_arclength(points: List[Point], n_fit: int) -> List[Point]:
-    """Pick n_fit points equally spaced by arc length along `points` (ends incl.)."""
-    seg = [math.hypot(points[i + 1][0] - points[i][0],
-                      points[i + 1][1] - points[i][1]) for i in range(len(points) - 1)]
-    cum = [0.0]
-    for s in seg:
-        cum.append(cum[-1] + s)
-    total = cum[-1]
-    out = []
-    for k in range(n_fit):
-        target = total * k / (n_fit - 1)
-        # find interval
-        i = 0
-        while i < len(cum) - 2 and cum[i + 1] < target:
-            i += 1
-        span = cum[i + 1] - cum[i]
-        f = 0.0 if span == 0 else (target - cum[i]) / span
-        out.append((points[i][0] + f * (points[i + 1][0] - points[i][0]),
-                    points[i][1] + f * (points[i + 1][1] - points[i][1])))
-    return out
+def _solve_linear(A: List[List[float]], b: List[float]) -> List[float]:
+    """Solve A x = b for a small square system (Gaussian elimination, partial
+    pivot). Pure Python -- the tip fit is at most 4x4."""
+    n = len(b)
+    M = [row[:] + [b[i]] for i, row in enumerate(A)]
+    for col in range(n):
+        piv = max(range(col, n), key=lambda r: abs(M[r][col]))
+        M[col], M[piv] = M[piv], M[col]
+        pv = M[col][col]
+        for r in range(n):
+            if r != col and M[r][col] != 0.0:
+                f = M[r][col] / pv
+                for c in range(col, n + 1):
+                    M[r][c] -= f * M[col][c]
+    return [M[i][n] / M[i][i] for i in range(n)]
+
+
+def _chord_params(pts: List[Point]) -> List[float]:
+    d = [0.0]
+    for i in range(1, len(pts)):
+        d.append(d[-1] + math.hypot(pts[i][0] - pts[i - 1][0],
+                                    pts[i][1] - pts[i - 1][1]))
+    total = d[-1] or 1.0
+    return [x / total for x in d]
+
+
+def _fit_bezier_coord(locus: List[Point], t: List[float], coord: int, degree: int,
+                      p0c: float, pdc: float, fixed_interior: dict) -> List[float]:
+    """Least-squares-fit the interior control-point values (indices 1..degree-1)
+    for one coordinate, with the endpoints (0, degree) and any `fixed_interior`
+    indices held fixed. Returns values for all interior indices 1..degree-1."""
+    free = [i for i in range(1, degree) if i not in fixed_interior]
+    rows = []
+    rhs = []
+    # Build basis (M) and residual (target minus fixed contributions) per sample.
+    basis = []
+    res = []
+    for tk, q in zip(t, locus):
+        fixed_sum = (_bernstein(degree, 0, tk) * p0c
+                     + _bernstein(degree, degree, tk) * pdc)
+        for i, v in fixed_interior.items():
+            fixed_sum += _bernstein(degree, i, tk) * v
+        basis.append([_bernstein(degree, i, tk) for i in free])
+        res.append(q[coord] - fixed_sum)
+    # Normal equations (M^T M) x = M^T res.
+    m = len(free)
+    A = [[0.0] * m for _ in range(m)]
+    b = [0.0] * m
+    for k in range(len(t)):
+        bk = basis[k]
+        rk = res[k]
+        for a in range(m):
+            b[a] += bk[a] * rk
+            for c in range(m):
+                A[a][c] += bk[a] * bk[c]
+    sol = _solve_linear(A, b) if m else []
+    result = dict(fixed_interior)
+    for j, i in enumerate(free):
+        result[i] = sol[j]
+    return [result[i] for i in range(1, degree)]
+
+
+def fit_tip_bezier(locus: List[Point], degree: int = 3,
+                   tangent_join: bool = False) -> List[Point]:
+    """Least-squares-fit a single clamped Bezier of `degree` (3 or 5) to the dense
+    conjugate tip `locus`. Endpoints are clamped to locus[0] (flank join) and
+    locus[-1] (apex); interior control points are free. With `tangent_join`, the
+    first interior control point shares the join's y so the curve leaves the join
+    horizontally (tangent to the flank) -- smoother but a worse envelope fit.
+    Returns degree+1 control points."""
+    if degree not in (3, 5):
+        raise ValueError("tip Bezier degree must be 3 or 5 (Fusion limitation)")
+    P0, Pd = locus[0], locus[-1]
+    t = _chord_params(locus)
+    xs = _fit_bezier_coord(locus, t, 0, degree, P0[0], Pd[0], {})
+    fixed_y = {1: P0[1]} if tangent_join else {}
+    ys = _fit_bezier_coord(locus, t, 1, degree, P0[1], Pd[1], fixed_y)
+    return [P0] + [(xs[i], ys[i]) for i in range(degree - 1)] + [Pd]
 
 
 # ============================================ wheel-tip conjugate envelope
@@ -349,11 +352,9 @@ def wheel_tip_points(inp: GearInputs, geo: DerivedGeometry,
 # ===================================================================== segments
 @dataclass
 class Segment:
-    kind: str                            # 'line' | 'spline' | 'arc3'
-    points: List[Point]
-    # for 'spline' tips: leave the named end tangent to the (horizontal) flank
-    clamp_start: bool = False
-    clamp_end: bool = False
+    kind: str                            # 'line' | 'arc3' | 'cpspline'
+    points: List[Point]                  # for 'cpspline': the Bezier control points
+    degree: int = 0                      # for 'cpspline': Bezier degree (3 or 5)
 
 
 def _pinion_cap_apex_x(geo: DerivedGeometry) -> float:
@@ -362,25 +363,27 @@ def _pinion_cap_apex_x(geo: DerivedGeometry) -> float:
 
 def build_wheel_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
     """One wheel tooth centered on the +x axis, as a connected counter-clockwise
-    list of Segments: lower flank (line) -> lower tip (spline) -> upper tip
-    (spline) -> upper flank (line). The tip is the conjugate envelope as a clamped
-    spline (resolution fit points per half) that leaves each flank join horizontal.
-    The apex is a sharp point (printer smooths it)."""
+    list of Segments: lower flank (line) -> lower tip (cpspline) -> upper tip
+    (cpspline) -> upper flank (line). The tip is the conjugate envelope fitted as a
+    single clamped Bezier per half (a control-point spline -- no tangent-handle DOF,
+    so it can be fully constrained and rotated in the sketch). `resolution` selects
+    the degree (<=4 -> 3, else 5); `tangent_join` makes the tip leave the flank join
+    horizontally. The apex is a sharp point (printer smooths it)."""
     rw = geo.pitch_radius_wheel
     hw = geo.half_w
-    n_fit = max(3, inp.resolution)
 
-    locus = wheel_tip_points(inp, geo)
-    lower = _resample_arclength(locus, n_fit)        # join(y=-hw) -> apex(y=0)
+    locus = wheel_tip_points(inp, geo)               # join(y=-hw) -> apex(y=0)
     # snap the endpoints exactly onto the flank level and the centerline (the
     # tau-crossing scan lands within ~1e-7 of them)
-    lower[0] = (lower[0][0], -hw)
-    apex = (lower[-1][0], 0.0)
-    lower = lower[:-1] + [apex]
-    join_x = lower[0][0]
-    upper = [(x, -y) for (x, y) in reversed(lower)]  # apex -> join(y=+hw)
-
+    locus[0] = (locus[0][0], -hw)
+    apex = (locus[-1][0], 0.0)
+    locus[-1] = apex
+    join_x = locus[0][0]
     apex_x = apex[0]
+
+    degree = 3 if inp.resolution <= 4 else 5
+    lower = fit_tip_bezier(locus, degree, inp.tangent_join)   # control points
+    upper = [(x, -y) for (x, y) in reversed(lower)]  # apex -> join(y=+hw)
     wheel_tip_h = apex_x - rw
     # root clears the MATING tooth's tip (pinion cap) + clearance
     pinion_tip_h = _pinion_cap_apex_x(geo) - geo.pitch_radius_pinion
@@ -391,8 +394,8 @@ def build_wheel_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
 
     segs: List[Segment] = []
     segs.append(Segment('line', [(foot_x, -hw), (join_x, -hw)]))
-    segs.append(Segment('spline', lower, clamp_start=True))   # horizontal at join
-    segs.append(Segment('spline', upper, clamp_end=True))     # horizontal at join
+    segs.append(Segment('cpspline', lower, degree=degree))    # join -> apex
+    segs.append(Segment('cpspline', upper, degree=degree))    # apex -> join
     segs.append(Segment('line', [(join_x, hw), (foot_x, hw)]))
     return segs
 
@@ -433,7 +436,7 @@ def array_tooth(tooth: List[Segment], teeth: int, base_angle: float) -> List[Seg
         for seg in tooth:
             out.append(Segment(seg.kind,
                                [rotate_point(p, (0.0, 0.0), ang) for p in seg.points],
-                               seg.clamp_start, seg.clamp_end))
+                               seg.degree))
     return out
 
 
@@ -514,17 +517,16 @@ def build_gear_pair(inp: GearInputs) -> GearPair:
 # ============================================ densify (for interference/testing)
 def densify_segments(segments: List[Segment], n_spline: int = 24,
                      n_arc: int = 24) -> List[Point]:
-    """Flatten a connected segment list to a dense polyline (local frame). Splines
-    are reconstructed as clamped cubics (matching the emitted tangents); arcs are
-    sampled through the mid point."""
+    """Flatten a connected segment list to a dense polyline (local frame). Control-
+    point splines are evaluated as Beziers; arcs are sampled through the mid point."""
     out: List[Point] = []
     for s in segments:
         if s.kind == 'line':
             pts = list(s.points)
         elif s.kind == 'arc3':
             pts = _arc3_curve(s.points[0], s.points[1], s.points[2], n_arc)
-        elif s.kind == 'spline':
-            pts = spline_curve(s.points, s.clamp_start, s.clamp_end, n_spline)
+        elif s.kind == 'cpspline':
+            pts = bezier_curve(s.points, n_spline)
         else:
             pts = list(s.points)
         if out and pts and abs(out[-1][0] - pts[0][0]) < 1e-9 and abs(out[-1][1] - pts[0][1]) < 1e-9:
