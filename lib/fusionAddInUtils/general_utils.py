@@ -25,17 +25,19 @@ def _text_palette():
 
 def log(message: str, level: adsk.core.LogLevels = adsk.core.LogLevels.InfoLogLevel,
         force_console: bool = False):
-    """Log to (1) stdout, (2) a file next to the add-in, (3) the Text Commands
-    palette (live, in-GUI), and (4) Fusion's own log. Robust: any sink failing
-    must not break the others."""
+    """Log to a file next to the add-in (full verbosity -- the debugging record) and,
+    for ERRORS only (or when DEBUG/force_console opt in), to the Text Commands palette
+    and stdout. Fusion routes print() to the Text Commands palette, so gating print is
+    what keeps that palette uncluttered. Robust: any sink failing must not break the
+    others."""
     line = str(message)
-    print(line)
     try:
         with open(LOG_FILE, 'a', encoding='utf-8') as f:
             f.write(line + '\n')
     except Exception:
         pass
     if DEBUG or force_console or level == adsk.core.LogLevels.ErrorLogLevel:
+        print(line)
         pal = _text_palette()
         if pal:
             try:
