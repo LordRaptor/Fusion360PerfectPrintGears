@@ -77,6 +77,14 @@ def _build_inputs(inputs):
     sel.addSelectionFilter('RootComponents')
     sel.setSelectionLimits(0, 1)
 
+    futil.log('build: sketchPlane')
+    plane_sel = inputs.addSelectionInput('sketchPlane', 'Sketch plane',
+                                         'Plane or planar face to build the gear sketches on '
+                                         '(default: the wheel component XY plane)')
+    plane_sel.addSelectionFilter('ConstructionPlanes')
+    plane_sel.addSelectionFilter('PlanarFaces')
+    plane_sel.setSelectionLimits(0, 1)
+
     futil.log('build: teeth')
     inputs.addIntegerSpinnerCommandInput('wheelTeeth', 'Wheel teeth', 6, 2000, 1, int(s['wheel_teeth']))
     inputs.addIntegerSpinnerCommandInput('pinionTeeth', 'Pinion teeth', 6, 2000, 1, int(s['pinion_teeth']))
@@ -221,6 +229,14 @@ def _resolve_target(inputs):
     return design.activeComponent
 
 
+def _resolve_plane(inputs):
+    """The selected construction plane / planar face, or None to use a default."""
+    sel = inputs.itemById('sketchPlane')
+    if sel.selectionCount == 1:
+        return sel.selection(0).entity
+    return None
+
+
 def _persist_settings(inputs):
     design = adsk.fusion.Design.cast(app.activeProduct)
     s = settings.defaults()
@@ -250,8 +266,9 @@ def command_execute(args: adsk.core.CommandEventArgs):
         gi = _read_inputs(inputs)
         pair = gear_math.build_gear_pair(gi)
         target = _resolve_target(inputs)
+        plane = _resolve_plane(inputs)
         thickness_mm = inputs.itemById('thickness').value / 0.1
-        sketch_builder.build_pair(target, pair, thickness_mm)
+        sketch_builder.build_pair(target, pair, thickness_mm, plane)
         _persist_settings(inputs)
         futil.log(f'{CMD_NAME}: generated {pair.wheel.teeth}T / {pair.pinion.teeth}T')
     except Exception:

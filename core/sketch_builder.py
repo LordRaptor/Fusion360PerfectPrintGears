@@ -153,7 +153,7 @@ def _nearest_profile(profiles, cx_cm, cy_cm):
 
 
 def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
-               thickness_mm: float, name: str,
+               thickness_mm: float, name: str, plane,
                lock_center: bool = False, mesh_to_pitch=None):
     """Sketch (root circle + one tooth) -> extrude the disk (new body) and the
     tooth (join) -> circular-pattern ONLY the tooth extrude `teeth` times about
@@ -170,7 +170,7 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
               f'root_r={profile.root_radius:.3f} add_r={profile.addendum_radius:.3f} '
               f'thickness={thickness_mm}mm')
 
-    sketch = component.sketches.add(component.xYConstructionPlane)
+    sketch = component.sketches.add(plane)
     sketch.name = name
 
     sketch.isComputeDeferred = True
@@ -392,11 +392,27 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
 
 
 def build_pair(component: adsk.fusion.Component, pair: gear_math.GearPair,
-               thickness_mm: float = 5.0) -> None:
+               thickness_mm: float = 5.0, plane=None) -> None:
     """Build both gears into `component` in meshing layout. The wheel is built
     first with its circle centres locked to the origin; the pinion then references
-    the wheel's pitch circle and is constrained tangent to it (the mesh)."""
+    the wheel's pitch circle and is constrained tangent to it (the mesh).
+
+    `plane` is the planar entity (construction plane or planar face) the sketches
+    are drawn on; defaults to the component's XY construction plane. A selected
+    planar FACE is converted to a coincident construction plane first -- sketching
+    directly on a face drags the face's edges into profile detection (fragmenting
+    the disk, adding a leftover region); a construction plane has no edges, so the
+    gear profiles stay clean. The plane is defined BY the face, so the gears remain
+    associated with it."""
+    if plane is None:
+        plane = component.xYConstructionPlane
+    elif isinstance(plane, adsk.fusion.BRepFace):
+        # Coincident construction plane = the face offset by zero. (Associative to
+        # the face; ConstructionPlaneInput has no setByPlanarFace.)
+        ci = component.constructionPlanes.createInput()
+        ci.setByOffset(plane, adsk.core.ValueInput.createByReal(0.0))
+        plane = component.constructionPlanes.add(ci)
     _, wheel_pitch = build_gear(component, pair.wheel, thickness_mm,
-                                f'PPG Wheel {pair.wheel.teeth}T', lock_center=True)
+                                f'PPG Wheel {pair.wheel.teeth}T', plane, lock_center=True)
     build_gear(component, pair.pinion, thickness_mm,
-               f'PPG Pinion {pair.pinion.teeth}T', mesh_to_pitch=wheel_pitch)
+               f'PPG Pinion {pair.pinion.teeth}T', plane, mesh_to_pitch=wheel_pitch)
