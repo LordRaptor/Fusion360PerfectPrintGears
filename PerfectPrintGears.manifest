@@ -3,7 +3,7 @@
     "type": "addin",
     "author": "Christopher Schank",
     "description": {
-        "": "Generates matched Perfect Print wheel + pinion gears as solid bodies"
+        "": "Generates matched Perfect Print wheel + pinion gears as solid bodies; the pinion is left free to swing about the wheel so you can align it with existing features"
     },
     "version": "1.4.0",
     "runOnStartup": false,
