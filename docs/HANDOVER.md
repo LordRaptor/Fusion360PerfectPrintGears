@@ -6,11 +6,28 @@
 The hard problem (the conjugate wheel-tip geometry) is **solved**; the add-in generates solid
 gears with **fully parametric, fully constrained** sketches. 38 pytest tests pass.
 
-**Post-v1 refinements (this session):** the dialog now shows a live **gear-ratio readout**
+**Post-v1 refinements:** the dialog now shows a live **gear-ratio readout**
 (decimal + GCD-reduced integer, e.g. `3.33 : 1 (10 : 3)`) and a read-only **Tooth width** field
 (renamed from "Feature width"). The default `tooth_fraction` is now **0.45** (was 0.5) for
 meshing backlash. Two sketch-constraint over/degenerate-constraint errors were cleared — see the
 notes in §3 (wheel tip apex) and §5 (pinion cap). Both gears build with a **clean log**.
+
+**Placement & targeting (this session, branch `feat/placement-targeting`):** three optional
+dialog inputs, each defaulting to today's behaviour — see the spec/plan dated 2026-06-27:
+- **Wheel component / Pinion component** — build the two gears into separate components. Each
+  resolves to `(component, occurrence)`; sketches are created with `occurrenceForCreation` on a
+  root-level shared plane, and the pinion projects the wheel's pitch circle via a
+  `createForAssemblyContext` proxy for the cross-component mesh. An empty pinion field defaults to
+  the wheel's component (Fusion blocks picking the same entity in two selection inputs).
+- **Sketch plane** — a construction plane *or planar face* (shared by both gears, default root XY).
+  A picked **face is converted to a coincident construction plane** (`setByOffset` 0) before
+  sketching, so the face's edges can't fragment the disk / add a leftover region (this bit us with
+  a small concentric axle-top face). `build_gear` now also draws each gear **at its final location**
+  (wheel at the picked point, pinion at wheel+center-distance) rather than drawing-then-moving — the
+  `isFixed` tip spline tears if the centre is moved by constraint.
+- **Wheel center** — a point (sketch point / construction point / vertex) the wheel centre sits on
+  (`project2`, linked); the tip-mirror match reflects about the actual centerline (`y=2*cy-y`), not
+  the global X axis, so an off-origin centre still solves.
 
 > This supersedes the older handover (which described the geometry as unsolved). That saga is
 > over — see §3.
@@ -157,9 +174,9 @@ mode — see §7). Every constraint/dimension call is wrapped in try/except + lo
 ## 6. NEXT — the follow-ons (not in v1)
 
 The user will start these next (collaboratively, step by step):
-1. **Split wheel and pinion into their own components** (currently both drawn into one target
-   component). The extrude Join is already `participantBodies`-scoped per gear, so it stays
-   correct across components.
+1. ~~**Split wheel and pinion into their own components**~~ — **DONE** (branch
+   `feat/placement-targeting`; see the Placement & targeting note at the top). Also done in that
+   branch: selectable sketch plane / planar face, and a selectable wheel centre point.
 2. **Rotate-the-arrangement option** — deliberately set up: the wheel centerline is
    horizontal-constrained and flanks are parallel to it, so rotating only needs to swap that
    horizontal for an **angle dimension**; the pinion phase already references the line of
