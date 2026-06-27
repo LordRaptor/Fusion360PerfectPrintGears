@@ -45,39 +45,61 @@ def stop():
 
 
 def command_created(args: adsk.core.CommandCreatedEventArgs):
-    futil.log(f'{CMD_NAME}: command_created')
-    inputs = args.command.commandInputs
+    futil.log(f'{CMD_NAME}: command_created START')
+    cmd = args.command
+    # Attach handlers FIRST so the command stays functional even if building an
+    # input later fails -- and so we can see the failure instead of a dead dialog.
+    futil.add_handler(cmd.execute, command_execute, local_handlers=local_handlers)
+    futil.add_handler(cmd.inputChanged, command_input_changed, local_handlers=local_handlers)
+    futil.add_handler(cmd.validateInputs, command_validate, local_handlers=local_handlers)
+    futil.add_handler(cmd.destroy, command_destroy, local_handlers=local_handlers)
+    try:
+        _build_inputs(cmd.commandInputs)
+        futil.log(f'{CMD_NAME}: command_created OK')
+    except Exception:
+        futil.handle_error('command_created/_build_inputs', show_message_box=True)
 
+
+def _build_inputs(inputs):
+    """Build the dialog inputs, logging each step so a failure points at the line."""
     design = adsk.fusion.Design.cast(app.activeProduct)
     s = settings.defaults()
     if design:
         attr = design.attributes.itemByName(ATTR_GROUP, ATTR_NAME)
         if attr:
             s = settings.from_json(attr.value)
+    futil.log(f'build: settings = {s}')
 
-    # Target component (single selection); defaults to the active component on execute.
+    futil.log('build: target')
     sel = inputs.addSelectionInput('target', 'Target component',
                                    'Component to draw the gear sketches into')
     sel.addSelectionFilter('Occurrences')
     sel.addSelectionFilter('RootComponents')
     sel.setSelectionLimits(0, 1)
 
+    futil.log('build: teeth')
     inputs.addIntegerSpinnerCommandInput('wheelTeeth', 'Wheel teeth', 6, 2000, 1, int(s['wheel_teeth']))
     inputs.addIntegerSpinnerCommandInput('pinionTeeth', 'Pinion teeth', 6, 2000, 1, int(s['pinion_teeth']))
 
+    futil.log('build: module')
     inputs.addValueInput('module', 'Module (mm)', 'mm',
                          adsk.core.ValueInput.createByReal(s['module_mm'] * 0.1))
 
-    # Tooth fraction: the circumferential-backlash knob (tooth width as a fraction
-    # of the circular pitch). 0.5 = equal tooth & space; < 0.5 gives backlash.
+    futil.log('build: toothFraction')
     inputs.addValueInput('toothFraction', 'Tooth fraction', '',
                          adsk.core.ValueInput.createByReal(s['tooth_fraction']))
-    # Feature width is DERIVED (read-only info): tooth_fraction * pi * module.
-    fwinfo = inputs.addTextBoxCommandInput('featureWidthInfo', 'Feature width', '', 1, True)
-    fwinfo.isFullWidth = False
 
-    # Clearance: switchable absolute / percent.
-    cmode = inputs.addButtonRowCommandInput('clearanceMode', 'Clearance mode', False)
+    futil.log('build: featureWidthInfo')
+    # Feature width is DERIVED -> a disabled value field (info only), not editable.
+    fwi = inputs.addValueInput('featureWidthInfo', 'Feature width (mm)', 'mm',
+                               adsk.core.ValueInput.createByReal(0.0))
+    fwi.isEnabled = False
+
+    futil.log('build: clearance')
+    # Text-list dropdown (a button row would require a per-item icon resource).
+    cmode = inputs.addDropDownCommandInput(
+        'clearanceMode', 'Clearance mode',
+        adsk.core.DropDownStyles.TextListDropDownStyle)
     cmode.listItems.add('Absolute', not s['clearance_is_percent'])
     cmode.listItems.add('Percent', s['clearance_is_percent'])
     cl = inputs.addValueInput('clearance', 'Clearance', 'mm',
@@ -87,7 +109,7 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
     cl.isVisible = not s['clearance_is_percent']
     clp.isVisible = s['clearance_is_percent']
 
-    # Advanced group.
+    futil.log('build: advanced')
     adv = inputs.addGroupCommandInput('advanced', 'Advanced')
     adv.isExpanded = False
     a = adv.children
@@ -97,23 +119,21 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
                     adsk.core.ValueInput.createByReal(s['dedendum_factor']))
     a.addIntegerSpinnerCommandInput('resolution', 'Tip spline points', 3, 40, 1, int(s['resolution']))
 
+    futil.log('build: errMsg')
     inputs.addTextBoxCommandInput('errMsg', '', '', 2, True).isFullWidth = True
 
+    futil.log('build: update feature width display')
     _update_feature_width_display(inputs)
-
-    futil.add_handler(args.command.execute, command_execute, local_handlers=local_handlers)
-    futil.add_handler(args.command.inputChanged, command_input_changed, local_handlers=local_handlers)
-    futil.add_handler(args.command.validateInputs, command_validate, local_handlers=local_handlers)
-    futil.add_handler(args.command.destroy, command_destroy, local_handlers=local_handlers)
+    futil.log('build: inputs done')
 
 
 def _update_feature_width_display(inputs):
-    """Recompute and show the derived feature width (read-only info)."""
+    """Recompute the derived feature width into the disabled value field (mm->cm)."""
     try:
         module_mm = inputs.itemById('module').value / 0.1
         tf = inputs.itemById('toothFraction').value
         fw = tf * math.pi * module_mm
-        inputs.itemById('featureWidthInfo').text = f'{fw:.3f} mm'
+        inputs.itemById('featureWidthInfo').value = fw * 0.1
     except Exception:
         pass
 
