@@ -24,11 +24,12 @@ def _pt(x_mm: float, y_mm: float) -> adsk.core.Point3D:
 
 
 def _draw_outline(sketch, segments, cx_mm, cy_mm):
-    """Draw a connected segment list (lines / 3-pt arcs / fitted splines).
-    Returns a list of (segment, created_curve) for downstream constraints."""
+    """Draw a connected segment list (lines / 3-pt arcs / fitted or control-point
+    splines). Returns a list of (segment, created_curve) for downstream constraints."""
     lines = sketch.sketchCurves.sketchLines
     arcs = sketch.sketchCurves.sketchArcs
     splines = sketch.sketchCurves.sketchFittedSplines
+    cpsplines = sketch.sketchCurves.sketchControlPointSplines
     drawn = []
     for seg in segments:
         pts = [(p[0] + cx_mm, p[1] + cy_mm) for p in seg.points]
@@ -41,6 +42,15 @@ def _draw_outline(sketch, segments, cx_mm, cy_mm):
             for p in pts:
                 coll.add(_pt(*p))
             ent = splines.add(coll)
+        elif seg.kind == 'cpspline':
+            # Control-point (Bezier) spline -- the control points ARE the input
+            # (off-curve). No tangent handles, so it can be fully constrained and
+            # rotated. Fusion accepts only degree 3 or 5. add() wants a plain LIST
+            # of Point3D (a std::vector<Base>), NOT an ObjectCollection.
+            ctrl = [_pt(*p) for p in pts]
+            deg = (adsk.fusion.SplineDegrees.SplineDegreeFive if seg.degree == 5
+                   else adsk.fusion.SplineDegrees.SplineDegreeThree)
+            ent = cpsplines.add(ctrl, deg)
         else:
             continue
         drawn.append((seg, ent))
@@ -138,6 +148,30 @@ def _constrain_flanks(sketch, flank_lines, root_circle, gcx_cm, gcy_cm,
             gc.addEqual(f1, f2)
         except Exception:
             futil.handle_error('flank equal length')
+
+
+def _lock_control_points_to_frame(sketch, spline, center_pt, apex_pt):
+    """Lock each INTERIOR control point of a control-point spline relative to the
+    centerline frame with two point-to-point distance dimensions: to the centre and
+    to the apex (both on the centerline, so each point rotates with the frame). The
+    two END control points are the curve ends and are skipped: Fusion auto-coincides
+    the drawn segment joins, so the start is already coincident with the flank top
+    and the end with the centerline end / upper spline -- adding dims there would
+    over-constrain. A control-point spline has no tangent handles, so locking the
+    control points fully constrains the curve."""
+    dims = sketch.sketchDimensions
+    aligned = adsk.fusion.DimensionOrientations.AlignedDimensionOrientation
+    cps = spline.controlPoints                         # SketchPointVector (len/index)
+    n = len(cps)
+    for i in range(1, n - 1):                          # interior only
+        cp = cps[i]
+        g = cp.geometry
+        for ref in (center_pt, apex_pt):
+            tp = adsk.core.Point3D.create(g.x, g.y, 0.0)
+            try:
+                dims.addDistanceDimension(cp, ref, aligned, tp, True)
+            except Exception:
+                futil.handle_error(f'tip control-point distance dim {i}')
 
 
 def _nearest_profile(profiles, cx_cm, cy_cm):
@@ -311,44 +345,60 @@ def build_gear(component: adsk.fusion.Component, occurrence, profile: gear_math.
                       pitch_circle=(None if lock_center else pitch_circle))
 
     if lock_center:
-        # Wheel tip: apex on the centerline end; fix the lower tip spline (its
-        # conjugate shape can't be dimensioned); mirror it to the upper per fit
-        # point (curve-level symmetry is a no-op for splines).
-        lower_spline = next((e for (s, e) in drawn
-                             if s.kind == 'spline' and s.clamp_start), None)
-        upper_spline = next((e for (s, e) in drawn
-                             if s.kind == 'spline' and s.clamp_end), None)
+        # Wheel tip: a control-point (Bezier) spline locked RELATIVE to the
+        # centerline frame, so it rotates with the centerline. A control-point
+        # spline has no tangent handles, so locking its control points fully
+        # constrains it (a fitted spline could not be). Apex control point on the
+        # centerline end; interior lower control points dimensioned to centre +
+        # apex; the upper half's interior control points follow by symmetry.
+        # (cpspline segments carry no clamp flags, so pick lower/upper by order:
+        # build_wheel_tooth emits lower [join->apex] then upper [apex->join].)
+        cpsplines = [e for (s, e) in drawn if s.kind == 'cpspline']
+        lower_spline = cpsplines[0] if len(cpsplines) >= 1 else None
+        upper_spline = cpsplines[1] if len(cpsplines) >= 2 else None
         if lower_spline is not None:
             try:
                 gc.addCoincident(lower_spline.endSketchPoint, centerline.endSketchPoint)
             except Exception:
                 futil.handle_error('tip apex coincident with centerline end')
-            try:
-                lower_spline.isFixed = True
-            except Exception:
-                futil.handle_error('fix lower tip spline')
+            # Lock the lower spline's INTERIOR control points to the frame (centre +
+            # apex, both on the centerline). The end control points are the curve
+            # ends (auto-coincided joins + apex->centerline end).
+            _lock_control_points_to_frame(sketch, lower_spline,
+                                          center_anchor, centerline.endSketchPoint)
             if upper_spline is not None:
+                # The lower spline's join auto-coincides to the lower flank on draw,
+                # but the upper spline's join does not (draw order); pin it to the
+                # nearest flank endpoint so the sketch is fully constrained.
                 try:
-                    lf, uf = lower_spline.fitPoints, upper_spline.fitPoints
-                    futil.log(f'build_gear {name}: tip fit points lower={lf.count} upper={uf.count}')
-                    # The apex fit point lies on the centerline, so its mirror is
-                    # itself: a symmetry constraint there is degenerate (it throws
-                    # VCS_SKETCH_SOLVING_FAILED) and is redundant -- the apex is
-                    # already pinned (centerline-end coincident + closed tooth loop).
-                    apex = lower_spline.endSketchPoint.geometry
-                    # The wheel centerline is horizontal at y = cy, so the mirror of
-                    # a point across it is (x, 2*cy - y) -- NOT (x, -y). Using -y only
-                    # works when the gear sits on the X axis; an off-origin centre
-                    # would pair the wrong upper fit point and the symmetry won't solve.
+                    je = upper_spline.endSketchPoint        # upper: apex -> join
+                    best, bestd = None, 1e18
+                    for fl in flank_lines:
+                        for ep in (fl.startSketchPoint, fl.endSketchPoint):
+                            d = math.hypot(ep.geometry.x - je.geometry.x,
+                                           ep.geometry.y - je.geometry.y)
+                            if d < bestd:
+                                bestd, best = d, ep
+                    if best is not None and bestd < 1e-3:    # cm: the genuine join
+                        gc.addCoincident(je, best)
+                except Exception:
+                    futil.handle_error('upper tip join coincident with upper flank')
+                try:
+                    lcp, ucp = lower_spline.controlPoints, upper_spline.controlPoints
+                    futil.log(f'build_gear {name}: tip control points '
+                              f'lower={len(lcp)} upper={len(ucp)}')
+                    # Mirror only the INTERIOR control points about the centerline
+                    # (endpoints are curve ends, pinned by coincidence; mirroring
+                    # them too would be redundant/over-constrained). The mirror of a
+                    # point across the centerline at y = cy is (x, 2*cy - y).
                     cy_cm = cy * MM_TO_CM
-                    for i in range(lf.count):
-                        lp = lf.item(i)
-                        if math.hypot(lp.geometry.x - apex.x, lp.geometry.y - apex.y) < 1e-4:
-                            continue
+                    n = len(lcp)
+                    for i in range(1, n - 1):
+                        lp = lcp[i]
                         tx, ty = lp.geometry.x, 2.0 * cy_cm - lp.geometry.y
                         best, bestd = None, 1e18
-                        for j in range(uf.count):
-                            up = uf.item(j)
+                        for j in range(len(ucp)):
+                            up = ucp[j]
                             d = math.hypot(up.geometry.x - tx, up.geometry.y - ty)
                             if d < bestd:
                                 bestd, best = d, up
@@ -356,9 +406,9 @@ def build_gear(component: adsk.fusion.Component, occurrence, profile: gear_math.
                             try:
                                 gc.addSymmetry(lp, best, centerline)
                             except Exception:
-                                futil.handle_error(f'tip fit-point symmetry {i}')
+                                futil.handle_error(f'tip control-point symmetry {i}')
                 except Exception:
-                    futil.handle_error('mirror tip spline fit points')
+                    futil.handle_error('mirror tip control points')
     else:
         # Pinion cap: coincident the arc endpoints with the flank tops, then make
         # the arc tangent to ONE flank. Both endpoints are pinned to the flank tops
