@@ -338,6 +338,19 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
                 except Exception:
                     futil.handle_error('cap tangent to flank')
 
+        # Phase: pin the pinion's rotation with an angular dimension between its
+        # centerline and the line of centers (pinion centre -> wheel centre, which
+        # is the sketch origin).
+        try:
+            loc = sketch.sketchCurves.sketchLines.addByTwoPoints(_pt(cx, cy), _pt(0.0, 0.0))
+            loc.isConstruction = True
+            gc.addCoincident(loc.startSketchPoint, pitch_circle.centerSketchPoint)
+            gc.addCoincident(loc.endSketchPoint, sketch.originPoint)
+            atp = adsk.core.Point3D.create(cx * MM_TO_CM - 1.0, cy * MM_TO_CM - 1.0, 0.0)
+            sketch.sketchDimensions.addAngularDimension(centerline, loc, atp, True)
+        except Exception:
+            futil.handle_error('pinion phase angular dimension')
+
     futil.log(f'build_gear {name}: profiles={sketch.profiles.count}')
     disk_prof, tooth_profs = _nearest_profile(sketch.profiles, cx * MM_TO_CM, cy * MM_TO_CM)
 
