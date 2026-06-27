@@ -50,7 +50,7 @@ def derive_geometry(inp: GearInputs) -> DerivedGeometry:
     rw = inp.module_mm * inp.wheel_teeth / 2.0
     rp = inp.module_mm * inp.pinion_teeth / 2.0
     cp = math.pi * inp.module_mm
-    fw = inp.tooth_fraction * cp
+    fw = tooth_width_from_module(inp.module_mm, inp.tooth_fraction)
     return DerivedGeometry(
         pitch_radius_wheel=rw,
         pitch_radius_pinion=rp,
@@ -60,6 +60,20 @@ def derive_geometry(inp: GearInputs) -> DerivedGeometry:
         feature_width_mm=fw,
         half_w=fw / 2.0,
     )
+
+
+def tooth_width_from_module(module_mm: float, tooth_fraction: float) -> float:
+    """Tooth width (mm) implied by a module and tooth fraction: tf * pi * module."""
+    return tooth_fraction * math.pi * module_mm
+
+
+def module_from_tooth_width(width_mm: float, tooth_fraction: float) -> float:
+    """Module (mm) that yields a given tooth width at a fixed tooth fraction.
+    The inverse of tooth_width_from_module; raises on a non-positive fraction
+    (guards a divide-by-zero from an in-progress dialog edit)."""
+    if tooth_fraction <= 0:
+        raise ValueError("tooth_fraction must be greater than 0")
+    return width_mm / (tooth_fraction * math.pi)
 
 
 MIN_PINION_TEETH = 6

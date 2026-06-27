@@ -31,6 +31,26 @@ def test_feature_width_scales_with_tooth_fraction():
     assert geo_b.feature_width_mm == pytest.approx(0.8 * geo_a.feature_width_mm)
 
 
+# ------------------------------------------------ tooth-width <-> module helpers
+def test_tooth_width_from_module():
+    # tooth_width = tooth_fraction * pi * module
+    assert gm.tooth_width_from_module(2.0, 0.5) == pytest.approx(0.5 * math.pi * 2.0)
+
+
+def test_module_from_tooth_width_inverts():
+    assert gm.module_from_tooth_width(0.5 * math.pi * 2.0, 0.5) == pytest.approx(2.0)
+
+
+def test_module_tooth_width_roundtrip():
+    m, tf = 1.5, 0.45
+    assert gm.module_from_tooth_width(gm.tooth_width_from_module(m, tf), tf) == pytest.approx(m)
+
+
+def test_module_from_tooth_width_rejects_nonpositive_fraction():
+    with pytest.raises(ValueError, match="tooth_fraction"):
+        gm.module_from_tooth_width(2.0, 0.0)
+
+
 # ------------------------------------------------------------------ validation
 def test_validate_accepts_good_inputs():
     gm.validate_inputs(_valid_inputs())
