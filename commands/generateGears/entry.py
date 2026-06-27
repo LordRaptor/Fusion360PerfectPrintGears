@@ -23,6 +23,8 @@ ATTR_NAME = 'Settings'
 
 local_handlers = []
 
+_linking = False  # reentrancy guard: setting ValueInput.value re-fires command_input_changed
+
 
 def start():
     cmd_def = ui.commandDefinitions.addButtonDefinition(CMD_ID, CMD_NAME, CMD_DESC, ICON_FOLDER)
@@ -119,8 +121,9 @@ def _build_inputs(inputs):
                     adsk.core.ValueInput.createByReal(s['module_mm'] * 0.1))
     t.addValueInput('toothFraction', 'Tooth fraction', '',
                     adsk.core.ValueInput.createByReal(s['tooth_fraction']))
-    fwi = t.addTextBoxCommandInput('featureWidthInfo', 'Tooth width', '', 1, True)
-    fwi.isFullWidth = False
+    t.addValueInput('toothWidth', 'Tooth width (mm)', 'mm',
+                    adsk.core.ValueInput.createByReal(
+                        gear_math.tooth_width_from_module(s['module_mm'], s['tooth_fraction']) * 0.1))
 
     futil.log('build: clearance')
     # Text-list dropdown (a button row would require a per-item icon resource).
@@ -156,8 +159,7 @@ def _build_inputs(inputs):
     futil.log('build: errMsg')
     inputs.addTextBoxCommandInput('errMsg', '', '', 2, True).isFullWidth = True
 
-    futil.log('build: update feature width display')
-    _update_feature_width_display(inputs)
+    futil.log('build: ratio display')
     _update_ratio_display(inputs)
     futil.log('build: inputs done')
 
@@ -168,16 +170,21 @@ def _tooth_inputs(inputs):
     return inputs.itemById('toothSizing').children
 
 
-def _update_feature_width_display(inputs):
-    """Recompute the derived feature width into the read-only text box (mm)."""
+def _relink_tooth_sizing(inputs, changed_id):
+    """Keep module / tooth fraction / tooth width consistent with
+    tooth_width = tooth_fraction * pi * module. The edited field plus the pinned
+    field (tooth_fraction, except when it is itself edited) determine the third."""
     try:
         t = _tooth_inputs(inputs)
         module_mm = t.itemById('module').value / 0.1
         tf = t.itemById('toothFraction').value
-        fw = gear_math.tooth_width_from_module(module_mm, tf)
-        t.itemById('featureWidthInfo').text = f'{fw:.3f} mm'
-    except Exception:
-        pass
+        width_mm = t.itemById('toothWidth').value / 0.1
+        if changed_id == 'toothWidth':
+            t.itemById('module').value = gear_math.module_from_tooth_width(width_mm, tf) * 0.1
+        else:  # 'module' or 'toothFraction' -> recompute width, tooth_fraction/module pinned
+            t.itemById('toothWidth').value = gear_math.tooth_width_from_module(module_mm, tf) * 0.1
+    except (ValueError, ZeroDivisionError):
+        pass  # in-progress edit (e.g. tooth_fraction == 0); leave fields as-is
 
 
 def _update_ratio_display(inputs):
@@ -191,13 +198,20 @@ def _update_ratio_display(inputs):
 
 
 def command_input_changed(args: adsk.core.InputChangedEventArgs):
+    global _linking
+    if _linking:
+        return
     # args.inputs is the collection that *directly* holds the changed input -- for an
     # input inside a group that is the group's children, not the root. Normalize to the
     # root command inputs so group lookups (itemById('toothSizing')) resolve.
     inputs = args.inputs.command.commandInputs
     changed = args.input
-    if changed.id in ('module', 'toothFraction'):
-        _update_feature_width_display(inputs)
+    if changed.id in ('module', 'toothFraction', 'toothWidth'):
+        _linking = True
+        try:
+            _relink_tooth_sizing(inputs, changed.id)
+        finally:
+            _linking = False
     elif changed.id in ('wheelTeeth', 'pinionTeeth'):
         _update_ratio_display(inputs)
     elif changed.id == 'clearanceMode':
