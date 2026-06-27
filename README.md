@@ -1,7 +1,7 @@
 # Perfect Print Gears — Fusion 360 Add-in
 
-A Fusion 360 add-in that generates **Perfect Print gears** as ready-to-extrude
-sketches: a matched **wheel + pinion** pair drawn into a component you select.
+A Fusion 360 add-in that generates **Perfect Print gears** as solid bodies: a
+matched **wheel + pinion** pair built into a component you select.
 
 Perfect Print gears are a 3D-print-optimized gear profile. Instead of an involute
 or a classic cycloid, both gears have **constant-width teeth** — each working flank
@@ -10,22 +10,20 @@ is a straight line parallel to a gear radial — and the wheel's tip is the exac
 constant velocity, low friction, and prints cleanly without fine involute detail.
 
 > ### Credit
-> The **Perfect Print gear** concept is the work of **Steve Peterson**, documented
-> in his *Clock Design Guidelines* (pp. 61–66, "Perfect Print Gears"). This add-in
-> is an independent implementation of that method; all credit for the gear design
-> itself belongs to Steve Peterson. Please refer to his guidelines for the
-> background and rationale behind the approach.
+> The **Perfect Print gear** concept is the work of **[Steve Peterson](https://www.stevesclocks.com)**,
+> documented in his *[Clock Design Guidelines](https://www.myminifactory.com/object/3d-print-clock-design-guidelines-pdf-714119)*
+> (pp. 61–66, "Perfect Print Gears"). This add-in is an independent implementation of that method;
+> all credit for the gear design itself belongs to Steve Peterson. Please refer to his guidelines for
+> the background and rationale behind the approach.
 
 ---
 
 ## What it does
 
-- Generates a **wheel** and a matching **pinion** as two sketches (no bodies — you
-  extrude and finish them yourself).
-- Draws them in **meshing layout**: wheel at the origin, pinion at the center
+- Generates a **wheel** and a matching **pinion** as **solid bodies** — each tooth is
+  extruded and circular-patterned from a fully-constrained parametric sketch.
+- Builds them in **meshing layout**: wheel at the origin, pinion at the center
   distance, pitch circles tangent.
-- Each sketch contains the full toothed outline (one closed loop), a center point,
-  and construction circles (pitch / root / addendum).
 - Persists your last-used settings on the document and pre-fills them next run.
 
 Because the wheel tip is conjugate to one specific pinion, **every wheel/pinion
@@ -49,7 +47,7 @@ Open **Solid → Create → Generate Perfect Print Gears** and set:
 
 | Input | Meaning |
 |---|---|
-| **Target component** | Where the two sketches are drawn (defaults to the active component). |
+| **Target component** | Where the two gears are built (defaults to the active component). |
 | **Wheel teeth / Pinion teeth** | Tooth counts (pinion ≥ 6, wheel ≥ pinion). |
 | **Module (mm)** | Sets the tooth size / pitch. `circular pitch = π · module`. |
 | **Tooth fraction** | Tooth width as a fraction of the circular pitch (0–0.5). **This is the backlash knob:** 0.5 = equal tooth and space; below 0.5 thins the teeth for circumferential play. The resulting **feature width** is shown read-only. |
@@ -73,8 +71,10 @@ one consistent kinematic model (the pinion rotates `+τ` about its center while 
 wheel rotates `−τ/ratio` about its). For a straight flank the contact point is the
 **foot of the perpendicular from the pitch point onto the flank**; sweeping `τ`
 traces the tip locus. It is trimmed from the flank join up to the centerline apex,
-mirrored, and represented as a fitted spline that leaves the flank **tangent**
-(smooth join). The apex is a sharp point (your printer rounds it).
+mirrored, and represented as a fitted spline. The join to the flank is **not**
+tangent — there is a real ~12° corner; forcing tangency deviates from the true
+envelope more, so the faithful (non-tangent) shape is kept. The apex is a sharp
+point (your printer rounds it).
 
 The engine (`core/gear_math.py`) is **pure Python** (no Fusion, no third-party
 deps), so the conjugation math is unit-tested without Fusion — including a
@@ -98,7 +98,7 @@ cannot be driven headless; it is verified by loading the add-in in Fusion.
 | Path | Responsibility |
 |---|---|
 | `core/gear_math.py` | Pure conjugation engine — no `adsk` import. |
-| `core/sketch_builder.py` | Renders engine output into Fusion sketches. |
+| `core/sketch_builder.py` | Renders engine output into Fusion sketches, then extrudes + patterns them into solids. |
 | `core/settings.py` | Pure (de)serialization of dialog settings. |
 | `commands/generateGears/entry.py` | Command, dialog, validation, persistence. |
 | `tests/` | pytest for the engine, settings, and interference guard. |
@@ -108,9 +108,9 @@ cannot be driven headless; it is verified by loading the add-in in Fusion.
 
 ## Scope (v1)
 
-Sketches only — no bodies, extrudes, fillets, bores, or motion links; no
-auto-created components; single mesh per run; spur (non-helical/bevel/internal)
-gears.
+Solid gear bodies (extrude + circular pattern) — no fillets, bores, or motion
+links; both gears are drawn into one selected component (not auto-split); single
+mesh per run; spur (non-helical/bevel/internal) gears.
 
 ## License & attribution
 
