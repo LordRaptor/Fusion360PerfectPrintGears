@@ -24,21 +24,27 @@ def _pt(x_mm: float, y_mm: float) -> adsk.core.Point3D:
 
 
 def _draw_outline(sketch, segments, cx_mm, cy_mm):
-    """Draw a connected segment list (lines / 3-pt arcs / fitted splines)."""
+    """Draw a connected segment list (lines / 3-pt arcs / fitted splines).
+    Returns a list of (segment, created_curve) for downstream constraints."""
     lines = sketch.sketchCurves.sketchLines
     arcs = sketch.sketchCurves.sketchArcs
     splines = sketch.sketchCurves.sketchFittedSplines
+    drawn = []
     for seg in segments:
         pts = [(p[0] + cx_mm, p[1] + cy_mm) for p in seg.points]
         if seg.kind == 'line':
-            lines.addByTwoPoints(_pt(*pts[0]), _pt(*pts[-1]))
+            ent = lines.addByTwoPoints(_pt(*pts[0]), _pt(*pts[-1]))
         elif seg.kind == 'arc3':
-            arcs.addByThreePoints(_pt(*pts[0]), _pt(*pts[1]), _pt(*pts[-1]))
+            ent = arcs.addByThreePoints(_pt(*pts[0]), _pt(*pts[1]), _pt(*pts[-1]))
         elif seg.kind == 'spline':
             coll = adsk.core.ObjectCollection.create()
             for p in pts:
                 coll.add(_pt(*p))
-            splines.add(coll)
+            ent = splines.add(coll)
+        else:
+            continue
+        drawn.append((seg, ent))
+    return drawn
 
 
 def _add_circle_diameters(sketch, cx_cm, cy_cm, items):
@@ -53,6 +59,61 @@ def _add_circle_diameters(sketch, cx_cm, cy_cm, items):
             dims.addDiameterDimension(circle, tp, True)
         except Exception:
             futil.handle_error('addDiameterDimension')
+
+
+def _constrain_flanks(sketch, flank_lines, root_circle, gcx_cm, gcy_cm, wheel,
+                      centerline=None):
+    """Constrain the tooth flank lines. BOTH gears: each flank's base (the end
+    nearest the root) coincident with the root circle. WHEEL only: both flanks
+    PARALLEL to the centerline construction line, a width offset dimension between
+    them, and a length dimension on one flank with an equal constraint on the
+    other. Defensive per constraint."""
+    gc = sketch.geometricConstraints
+    dims = sketch.sketchDimensions
+
+    def foot_point(line):
+        sp, ep = line.startSketchPoint, line.endSketchPoint
+        ds = math.hypot(sp.geometry.x - gcx_cm, sp.geometry.y - gcy_cm)
+        de = math.hypot(ep.geometry.x - gcx_cm, ep.geometry.y - gcy_cm)
+        return sp if ds < de else ep
+
+    for line in flank_lines:
+        try:
+            gc.addCoincident(foot_point(line), root_circle)
+        except Exception:
+            futil.handle_error('flank base coincident with root circle')
+
+    if not wheel or len(flank_lines) < 2:
+        return
+    f1, f2 = flank_lines[0], flank_lines[1]
+    for line in (f1, f2):
+        try:
+            if centerline is not None:
+                gc.addParallel(line, centerline)
+            else:
+                gc.addHorizontal(line)
+        except Exception:
+            futil.handle_error('flank parallel/horizontal')
+    # Width: perpendicular distance between the two parallel flanks.
+    try:
+        s1, s2 = f1.startSketchPoint.geometry, f2.startSketchPoint.geometry
+        wtp = adsk.core.Point3D.create((s1.x + s2.x) / 2.0, (s1.y + s2.y) / 2.0, 0.0)
+        dims.addOffsetDimension(f1, f2, wtp, True)
+    except Exception:
+        futil.handle_error('flank width offset dimension')
+    # Length: dimension one flank; equal-constrain the other to it.
+    try:
+        sp, ep = f1.startSketchPoint, f1.endSketchPoint
+        ltp = adsk.core.Point3D.create((sp.geometry.x + ep.geometry.x) / 2.0,
+                                       (sp.geometry.y + ep.geometry.y) / 2.0 - 0.3, 0.0)
+        dims.addDistanceDimension(
+            sp, ep, adsk.fusion.DimensionOrientations.AlignedDimensionOrientation, ltp, True)
+    except Exception:
+        futil.handle_error('flank length dimension')
+    try:
+        gc.addEqual(f1, f2)
+    except Exception:
+        futil.handle_error('flank equal')
 
 
 def _nearest_profile(profiles, cx_cm, cy_cm):
@@ -99,7 +160,7 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
         add_circle = circles.addByCenterRadius(_pt(cx, cy), profile.addendum_radius * MM_TO_CM)
         add_circle.isConstruction = True
         tooth = gear_math.array_tooth(profile.tooth_segments, 1, profile.base_angle)
-        _draw_outline(sketch, tooth, cx, cy)
+        drawn = _draw_outline(sketch, tooth, cx, cy)
     finally:
         sketch.isComputeDeferred = False
 
@@ -152,6 +213,29 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
             futil.log(f'build_gear {name}: pitch tangent + centre horizontal with wheel')
         except Exception:
             futil.handle_error('mesh tangent to wheel pitch circle')
+
+    # Constraints step 3: tooth flanks. For the wheel, build a centerline
+    # construction line (centre -> tooth tip) that is horizontal, and make the
+    # flanks parallel to it -- so a future "rotate the arrangement" option only
+    # needs to replace the centerline's horizontal constraint.
+    flank_lines = [e for (s, e) in drawn if s.kind == 'line']
+    centerline = None
+    if lock_center:
+        ax = profile.base_angle
+        apex_mm = (cx + profile.addendum_radius * math.cos(ax),
+                   cy + profile.addendum_radius * math.sin(ax))
+        centerline = sketch.sketchCurves.sketchLines.addByTwoPoints(_pt(cx, cy), _pt(*apex_mm))
+        centerline.isConstruction = True
+        try:
+            gc.addCoincident(centerline.startSketchPoint, sketch.originPoint)
+        except Exception:
+            futil.handle_error('centerline start coincident with origin')
+        try:
+            gc.addHorizontal(centerline)
+        except Exception:
+            futil.handle_error('centerline horizontal')
+    _constrain_flanks(sketch, flank_lines, root_circle, cx * MM_TO_CM, cy * MM_TO_CM,
+                      wheel=lock_center, centerline=centerline)
 
     futil.log(f'build_gear {name}: profiles={sketch.profiles.count}')
     disk_prof, tooth_profs = _nearest_profile(sketch.profiles, cx * MM_TO_CM, cy * MM_TO_CM)
