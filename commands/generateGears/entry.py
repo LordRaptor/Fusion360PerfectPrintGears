@@ -111,17 +111,15 @@ def _build_inputs(inputs):
     rinfo = inputs.addTextBoxCommandInput('ratioInfo', 'Gear ratio', '', 1, True)
     rinfo.isFullWidth = False
 
-    futil.log('build: module')
-    inputs.addValueInput('module', 'Module (mm)', 'mm',
-                         adsk.core.ValueInput.createByReal(s['module_mm'] * 0.1))
-
-    futil.log('build: toothFraction')
-    inputs.addValueInput('toothFraction', 'Tooth fraction', '',
-                         adsk.core.ValueInput.createByReal(s['tooth_fraction']))
-
-    futil.log('build: featureWidthInfo')
-    # Feature width is DERIVED -> a read-only text box (info only), not editable.
-    fwi = inputs.addTextBoxCommandInput('featureWidthInfo', 'Tooth width', '', 1, True)
+    futil.log('build: toothSizing group')
+    tsz = inputs.addGroupCommandInput('toothSizing', 'Tooth sizing')
+    tsz.isExpanded = True
+    t = tsz.children
+    t.addValueInput('module', 'Module (mm)', 'mm',
+                    adsk.core.ValueInput.createByReal(s['module_mm'] * 0.1))
+    t.addValueInput('toothFraction', 'Tooth fraction', '',
+                    adsk.core.ValueInput.createByReal(s['tooth_fraction']))
+    fwi = t.addTextBoxCommandInput('featureWidthInfo', 'Tooth width', '', 1, True)
     fwi.isFullWidth = False
 
     futil.log('build: clearance')
@@ -164,13 +162,20 @@ def _build_inputs(inputs):
     futil.log('build: inputs done')
 
 
+def _tooth_inputs(inputs):
+    """Children of the 'Tooth sizing' group (module / toothFraction / toothWidth).
+    itemById is treated as non-recursive here, so nested inputs are reached via .children."""
+    return inputs.itemById('toothSizing').children
+
+
 def _update_feature_width_display(inputs):
     """Recompute the derived feature width into the read-only text box (mm)."""
     try:
-        module_mm = inputs.itemById('module').value / 0.1
-        tf = inputs.itemById('toothFraction').value
-        fw = tf * math.pi * module_mm
-        inputs.itemById('featureWidthInfo').text = f'{fw:.3f} mm'
+        t = _tooth_inputs(inputs)
+        module_mm = t.itemById('module').value / 0.1
+        tf = t.itemById('toothFraction').value
+        fw = gear_math.tooth_width_from_module(module_mm, tf)
+        t.itemById('featureWidthInfo').text = f'{fw:.3f} mm'
     except Exception:
         pass
 
@@ -186,7 +191,10 @@ def _update_ratio_display(inputs):
 
 
 def command_input_changed(args: adsk.core.InputChangedEventArgs):
-    inputs = args.inputs
+    # args.inputs is the collection that *directly* holds the changed input -- for an
+    # input inside a group that is the group's children, not the root. Normalize to the
+    # root command inputs so group lookups (itemById('toothSizing')) resolve.
+    inputs = args.inputs.command.commandInputs
     changed = args.input
     if changed.id in ('module', 'toothFraction'):
         _update_feature_width_display(inputs)
@@ -200,8 +208,9 @@ def command_input_changed(args: adsk.core.InputChangedEventArgs):
 
 def _read_inputs(inputs):
     """Collect dialog values into a gear_math.GearInputs (all mm). Raises ValueError."""
-    module_mm = inputs.itemById('module').value / 0.1          # cm -> mm
-    tooth_fraction = inputs.itemById('toothFraction').value
+    t = _tooth_inputs(inputs)
+    module_mm = t.itemById('module').value / 0.1               # cm -> mm
+    tooth_fraction = t.itemById('toothFraction').value
     # Feature width is derived; clearance-as-percent uses it as the basis.
     feature_width_mm = tooth_fraction * math.pi * module_mm
 
@@ -227,7 +236,9 @@ def _read_inputs(inputs):
 
 
 def command_validate(args: adsk.core.ValidateInputsEventArgs):
-    inputs = args.inputs
+    # Normalize to the root command inputs (see command_input_changed) so _read_inputs
+    # can descend into the 'toothSizing' group.
+    inputs = args.inputs.command.commandInputs
     err = inputs.itemById('errMsg')
     try:
         gi = _read_inputs(inputs)
@@ -283,8 +294,8 @@ def _persist_settings(inputs):
     s.update({
         'wheel_teeth': inputs.itemById('wheelTeeth').value,
         'pinion_teeth': inputs.itemById('pinionTeeth').value,
-        'module_mm': inputs.itemById('module').value / 0.1,
-        'tooth_fraction': inputs.itemById('toothFraction').value,
+        'module_mm': _tooth_inputs(inputs).itemById('module').value / 0.1,
+        'tooth_fraction': _tooth_inputs(inputs).itemById('toothFraction').value,
         'clearance_is_percent': inputs.itemById('clearanceMode').selectedItem.name == 'Percent',
         'clearance_mm': inputs.itemById('clearance').value / 0.1,
         'clearance_pct': inputs.itemById('clearancePct').value,
