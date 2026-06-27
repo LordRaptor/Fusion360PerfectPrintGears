@@ -174,6 +174,41 @@ def _lock_control_points_to_frame(sketch, spline, center_pt, apex_pt):
                 futil.handle_error(f'tip control-point distance dim {i}')
 
 
+def _orient_wheel(sketch, gc, centerline, center_anchor, add_circle,
+                  cx_mm, cy_mm, addendum_radius_mm, use_angle_dim=True):
+    """Fix the wheel tooth's orientation.
+
+    use_angle_dim (default): add an ANGULAR dimension between the centerline and a
+    vertical construction reference through the centre, so the wheel can be rotated
+    later by editing it. Home reads 90deg -- a 0deg dim against a horizontal
+    reference is degenerate (collinear lines sharing a vertex). The reference line
+    is itself fully constrained (start at centre, vertical, end on the addendum
+    circle).
+
+    Otherwise: simply constrain the centerline HORIZONTAL -- not rotatable, but
+    cleaner. Kept for the rotate-the-arrangement work, where a rotation of 0 can
+    use the plain horizontal instead of a 90deg angle dim (per the chosen rotation
+    scheme)."""
+    if not use_angle_dim:
+        try:
+            gc.addHorizontal(centerline)
+        except Exception:
+            futil.handle_error('centerline horizontal')
+        return
+    try:
+        ref = sketch.sketchCurves.sketchLines.addByTwoPoints(
+            _pt(cx_mm, cy_mm), _pt(cx_mm, cy_mm + addendum_radius_mm))
+        ref.isConstruction = True
+        gc.addCoincident(ref.startSketchPoint, center_anchor)
+        gc.addVertical(ref)
+        # pin the free endpoint (length) so the reference line is constrained too
+        gc.addCoincident(ref.endSketchPoint, add_circle)
+        atp = adsk.core.Point3D.create(cx_mm * MM_TO_CM + 0.5, cy_mm * MM_TO_CM + 0.5, 0.0)
+        sketch.sketchDimensions.addAngularDimension(centerline, ref, atp, True)
+    except Exception:
+        futil.handle_error('wheel orientation angle dimension')
+
+
 def _nearest_profile(profiles, cx_cm, cy_cm):
     """Return (disk_profile, [other_profiles]) split by centroid distance to the
     gear centre. The disk profile's centroid is at the centre; the tooth tab's is
@@ -335,10 +370,11 @@ def build_gear(component: adsk.fusion.Component, occurrence, profile: gear_math.
     except Exception:
         futil.handle_error('centerline end coincident with addendum circle')
     if lock_center:
-        try:
-            gc.addHorizontal(centerline)
-        except Exception:
-            futil.handle_error('centerline horizontal')
+        # Orientation: angle dimension (rotatable) by default; the horizontal
+        # alternative is preserved in _orient_wheel for the rotate-the-arrangement
+        # work (rotation 0 can use plain horizontal).
+        _orient_wheel(sketch, gc, centerline, center_anchor, add_circle,
+                      cx, cy, profile.addendum_radius, use_angle_dim=True)
 
     _constrain_flanks(sketch, flank_lines, root_circle, cx * MM_TO_CM, cy * MM_TO_CM,
                       centerline=centerline,
