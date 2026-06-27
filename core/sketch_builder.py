@@ -1,13 +1,15 @@
-"""Draws gear_math output into Fusion sketches. Converts mm (engine) -> cm (Fusion).
+"""Builds Perfect Print gears in Fusion: one tooth on the root disk -> extrude
+-> model circular pattern. Converts mm (engine) -> cm (Fusion).
 
-This is the only module besides entry.py that imports adsk. It does no geometry
-math: it consumes the plain Segment/GearProfile data from gear_math and renders it.
-
-Pinion rounded tips are drawn as tangent arcs (tangent to both adjacent flanks).
-Wheel tip halves are fitted splines that carry clamp_start/clamp_end flags marking
-which end must leave the adjoining flank tangentially; a tangent constraint is added
-at that end so the drawn sketch matches the smooth (corner-free) flank/tip join.
+Per the chosen workflow: draw the full root circle plus ONE tooth (a "wheel with a
+single tooth"), extrude the resulting profiles (disk + tooth) to the given
+thickness, then circular-pattern the extrude feature `teeth` times about a
+construction axis through the gear centre. The concentric disks coincide so the
+pattern reads as a solid gear. Everything goes into the one target component for
+now (splitting wheel/pinion into separate components is a planned extension).
 """
+import math
+
 import adsk.core
 import adsk.fusion
 
@@ -16,119 +18,111 @@ from ..lib import fusionAddInUtils as futil
 
 MM_TO_CM = 0.1
 
-# Auto tangent constraints are OFF for now: applying ~100+ constraints with the
-# solver live distorts the (already-correct) placed geometry and is very slow.
-# Proper parametric constraints are a planned later rework.
-DRAW_TANGENT_CONSTRAINTS = False
-
 
 def _pt(x_mm: float, y_mm: float) -> adsk.core.Point3D:
     return adsk.core.Point3D.create(x_mm * MM_TO_CM, y_mm * MM_TO_CM, 0.0)
 
 
-def _draw_outline(sketch: adsk.fusion.Sketch, segments, cx_mm: float, cy_mm: float):
-    """Draw the connected outline. Returns a list of (seg, curve) in segment order
-    so tangency between a tip (arc or spline) and its neighbouring flank lines can
-    be added afterwards."""
+def _draw_outline(sketch, segments, cx_mm, cy_mm):
+    """Draw a connected segment list (lines / 3-pt arcs / fitted splines)."""
     lines = sketch.sketchCurves.sketchLines
     arcs = sketch.sketchCurves.sketchArcs
     splines = sketch.sketchCurves.sketchFittedSplines
-
-    drawn = []
     for seg in segments:
         pts = [(p[0] + cx_mm, p[1] + cy_mm) for p in seg.points]
         if seg.kind == 'line':
-            curve = lines.addByTwoPoints(_pt(*pts[0]), _pt(*pts[-1]))
+            lines.addByTwoPoints(_pt(*pts[0]), _pt(*pts[-1]))
         elif seg.kind == 'arc3':
-            s, m, e = pts[0], pts[1], pts[-1]
-            curve = arcs.addByThreePoints(_pt(*s), _pt(*m), _pt(*e))
+            arcs.addByThreePoints(_pt(*pts[0]), _pt(*pts[1]), _pt(*pts[-1]))
         elif seg.kind == 'spline':
             coll = adsk.core.ObjectCollection.create()
             for p in pts:
                 coll.add(_pt(*p))
-            curve = splines.add(coll)
-        else:
-            continue
-        drawn.append((seg, curve))
-    return drawn
+            splines.add(coll)
 
 
-def _add_tangencies(sketch: adsk.fusion.Sketch, drawn):
-    """Constrain tips tangent to their neighbouring flank lines:
-      - arc3 tips (pinion cap): tangent to both adjacent lines;
-      - spline tips (wheel): tangent to the previous line if clamp_start, and/or
-        the next line if clamp_end (the smooth flank/tip joins).
-    Wrapped defensively: a solver rejection on one tooth must not abort generation."""
-    constraints = sketch.geometricConstraints
-    n = len(drawn)
-
-    def tangent(a, b):
-        try:
-            constraints.addTangent(a, b)
-        except Exception:
-            # Over-constrained / solver rejection on a tooth: skip, keep going.
-            pass
-
-    for i, (seg, curve) in enumerate(drawn):
-        prev_seg, prev_curve = drawn[(i - 1) % n]
-        next_seg, next_curve = drawn[(i + 1) % n]
-        if seg.kind == 'arc3':
-            if prev_seg.kind == 'line':
-                tangent(curve, prev_curve)
-            if next_seg.kind == 'line':
-                tangent(curve, next_curve)
-        elif seg.kind == 'spline':
-            if seg.clamp_start and prev_seg.kind == 'line':
-                tangent(curve, prev_curve)
-            if seg.clamp_end and next_seg.kind == 'line':
-                tangent(curve, next_curve)
+def _nearest_profile(profiles, cx_cm, cy_cm):
+    """Return (disk_profile, [other_profiles]) split by centroid distance to the
+    gear centre. The disk profile's centroid is at the centre; the tooth tab's is
+    out by the tooth."""
+    ranked = []
+    for p in profiles:
+        c = p.areaProperties(adsk.fusion.CalculationAccuracy.LowCalculationAccuracy).centroid
+        ranked.append((math.hypot(c.x - cx_cm, c.y - cy_cm), p))
+    ranked.sort(key=lambda t: t[0])
+    return ranked[0][1], [p for _, p in ranked[1:]]
 
 
-def draw_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
-              name: str) -> adsk.fusion.Sketch:
-    """Create one sketch in `component` with: a center point, construction circles
-    (pitch/root/addendum), and the full toothed outline. Rounded tips are tangent."""
+def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
+               thickness_mm: float, name: str):
+    """Sketch (root circle + one tooth) -> extrude the disk (new body) and the
+    tooth (join) -> circular-pattern ONLY the tooth extrude `teeth` times about
+    the root circle. Yields a single clean gear body (disk + N teeth).
+
+    Mirrors FusionCycloidalGears: sketch circle as the pattern axis, profiles
+    picked by centroid, tooth joined onto the disk via participantBodies, no
+    construction axis, no combine. (We skip its dedendum Cut -- our tooth profile
+    already runs to the root.)
+    """
+    cx, cy = profile.center
+    th_cm = thickness_mm * MM_TO_CM
+    futil.log(f'build_gear {name}: center=({cx:.3f},{cy:.3f})mm teeth={profile.teeth} '
+              f'root_r={profile.root_radius:.3f} add_r={profile.addendum_radius:.3f} '
+              f'thickness={thickness_mm}mm')
+
     sketch = component.sketches.add(component.xYConstructionPlane)
     sketch.name = name
-    cx, cy = profile.center
-
-    # Diagnostics: counts + bounding box (mm) so the log cross-checks scale/placement.
-    kinds = {}
-    xs, ys = [], []
-    for s in profile.segments:
-        kinds[s.kind] = kinds.get(s.kind, 0) + 1
-        for (x, y) in s.points:
-            xs.append(x + cx); ys.append(y + cy)
-    futil.log(f'draw_gear {name}: center=({cx:.3f},{cy:.3f})mm segments={len(profile.segments)} '
-              f'kinds={kinds} pitch_r={profile.pitch_radius:.3f} root_r={profile.root_radius:.3f} '
-              f'add_r={profile.addendum_radius:.3f}')
-    if xs:
-        futil.log(f'  bbox mm: x[{min(xs):.3f},{max(xs):.3f}] y[{min(ys):.3f},{max(ys):.3f}] '
-                  f'(drawn in cm = mm*{MM_TO_CM})')
 
     sketch.isComputeDeferred = True
     try:
         sketch.sketchPoints.add(_pt(cx, cy))
-
         circles = sketch.sketchCurves.sketchCircles
-        for r in (profile.pitch_radius, profile.root_radius, profile.addendum_radius):
+        # Root circle REAL (bounds the disk profile + serves as the pattern axis);
+        # pitch/addendum drawn as construction references.
+        root_circle = circles.addByCenterRadius(_pt(cx, cy), profile.root_radius * MM_TO_CM)
+        for r in (profile.pitch_radius, profile.addendum_radius):
             c = circles.addByCenterRadius(_pt(cx, cy), r * MM_TO_CM)
             c.isConstruction = True
-
-        drawn = _draw_outline(sketch, profile.segments, cx, cy)
+        tooth = gear_math.array_tooth(profile.tooth_segments, 1, profile.base_angle)
+        _draw_outline(sketch, tooth, cx, cy)
     finally:
         sketch.isComputeDeferred = False
 
-    futil.log(f'draw_gear {name}: drew {len(drawn)} curves, '
-              f'tangent_constraints={"on" if DRAW_TANGENT_CONSTRAINTS else "off"}')
-    if DRAW_TANGENT_CONSTRAINTS:
-        # Tangencies added after the solver is live so it can apply them.
-        _add_tangencies(sketch, drawn)
+    futil.log(f'build_gear {name}: profiles={sketch.profiles.count}')
+    disk_prof, tooth_profs = _nearest_profile(sketch.profiles, cx * MM_TO_CM, cy * MM_TO_CM)
+
+    extrudes = component.features.extrudeFeatures
+    dist = adsk.core.ValueInput.createByReal(th_cm)
+
+    # Disk -> new body.
+    disk_in = extrudes.createInput(disk_prof, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+    disk_in.setDistanceExtent(False, dist)
+    disk_ext = extrudes.add(disk_in)
+    base_body = disk_ext.bodies.item(0)
+
+    # Tooth -> join onto the disk body.
+    tooth_coll = adsk.core.ObjectCollection.create()
+    for p in tooth_profs:
+        tooth_coll.add(p)
+    tooth_in = extrudes.createInput(tooth_coll, adsk.fusion.FeatureOperations.JoinFeatureOperation)
+    tooth_in.setDistanceExtent(False, dist)
+    tooth_in.participantBodies = [base_body]
+    tooth_ext = extrudes.add(tooth_in)
+
+    # Circular-pattern ONLY the tooth extrude about the root circle (its axis).
+    coll = adsk.core.ObjectCollection.create()
+    coll.add(tooth_ext)
+    circ = component.features.circularPatternFeatures
+    cp_input = circ.createInput(coll, root_circle)
+    cp_input.quantity = adsk.core.ValueInput.createByReal(float(profile.teeth))
+    circ.add(cp_input)
+
+    futil.log(f'build_gear {name}: disk+tooth extruded, pattern x{profile.teeth} done')
     return sketch
 
 
-def build_pair(component: adsk.fusion.Component, pair: gear_math.GearPair) -> None:
-    """Draw both gears of `pair` into `component` as two sketches in meshing layout
-    (wheel at origin, pinion at the center distance on +x)."""
-    draw_gear(component, pair.wheel, f'PPG Wheel {pair.wheel.teeth}T')
-    draw_gear(component, pair.pinion, f'PPG Pinion {pair.pinion.teeth}T')
+def build_pair(component: adsk.fusion.Component, pair: gear_math.GearPair,
+               thickness_mm: float = 5.0) -> None:
+    """Build both gears into `component` in meshing layout."""
+    build_gear(component, pair.wheel, thickness_mm, f'PPG Wheel {pair.wheel.teeth}T')
+    build_gear(component, pair.pinion, thickness_mm, f'PPG Pinion {pair.pinion.teeth}T')

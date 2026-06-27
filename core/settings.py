@@ -11,6 +11,7 @@ _DEFAULTS = {
     "clearance_is_percent": False,
     "clearance_mm": 0.1,
     "clearance_pct": 5.0,
+    "thickness_mm": 5.0,          # extrude depth
     "addendum_factor": 1.0,
     "dedendum_factor": 1.0,
     "resolution": 4,          # wheel-tip spline fit points per half

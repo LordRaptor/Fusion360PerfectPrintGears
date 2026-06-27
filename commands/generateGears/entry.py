@@ -109,6 +109,10 @@ def _build_inputs(inputs):
     cl.isVisible = not s['clearance_is_percent']
     clp.isVisible = s['clearance_is_percent']
 
+    futil.log('build: thickness')
+    inputs.addValueInput('thickness', 'Thickness (mm)', 'mm',
+                         adsk.core.ValueInput.createByReal(s['thickness_mm'] * 0.1))
+
     futil.log('build: advanced')
     adv = inputs.addGroupCommandInput('advanced', 'Advanced')
     adv.isExpanded = False
@@ -211,6 +215,7 @@ def _persist_settings(inputs):
         'clearance_is_percent': inputs.itemById('clearanceMode').selectedItem.name == 'Percent',
         'clearance_mm': inputs.itemById('clearance').value / 0.1,
         'clearance_pct': inputs.itemById('clearancePct').value,
+        'thickness_mm': inputs.itemById('thickness').value / 0.1,
         'addendum_factor': inputs.itemById('advanced').children.itemById('addendumFactor').value,
         'dedendum_factor': inputs.itemById('advanced').children.itemById('dedendumFactor').value,
         'resolution': inputs.itemById('advanced').children.itemById('resolution').value,
@@ -228,7 +233,8 @@ def command_execute(args: adsk.core.CommandEventArgs):
         gi = _read_inputs(inputs)
         pair = gear_math.build_gear_pair(gi)
         target = _resolve_target(inputs)
-        sketch_builder.build_pair(target, pair)
+        thickness_mm = inputs.itemById('thickness').value / 0.1
+        sketch_builder.build_pair(target, pair, thickness_mm)
         _persist_settings(inputs)
         futil.log(f'{CMD_NAME}: generated {pair.wheel.teeth}T / {pair.pinion.teeth}T')
     except Exception:

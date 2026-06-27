@@ -457,7 +457,9 @@ class GearProfile:
     pitch_radius: float
     root_radius: float
     addendum_radius: float
-    segments: List[Segment]
+    segments: List[Segment]                 # all teeth, closed loop (gear-local)
+    tooth_segments: Optional[List[Segment]] = None   # ONE tooth (gear-local, +x)
+    base_angle: float = 0.0                  # orientation of tooth 0 for patterning
 
 
 @dataclass
@@ -491,9 +493,12 @@ def build_gear_pair(inp: GearInputs) -> GearPair:
     p_root, p_add = _radii(pinion_segs)
 
     wheel = GearProfile('wheel', inp.wheel_teeth, (0.0, 0.0),
-                        geo.pitch_radius_wheel, w_root, w_add, wheel_segs)
+                        geo.pitch_radius_wheel, w_root, w_add, wheel_segs,
+                        tooth_segments=wheel_tooth, base_angle=0.0)
     pinion = GearProfile('pinion', inp.pinion_teeth, (geo.center_distance, 0.0),
-                         geo.pitch_radius_pinion, p_root, p_add, pinion_segs)
+                         geo.pitch_radius_pinion, p_root, p_add, pinion_segs,
+                         tooth_segments=pinion_tooth,
+                         base_angle=math.pi + pinion_half_pitch)
     return GearPair(wheel, pinion, geo.center_distance, geo.circular_pitch)
 
 
