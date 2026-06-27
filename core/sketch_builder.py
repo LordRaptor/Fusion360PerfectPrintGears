@@ -3,9 +3,10 @@
 This is the only module besides entry.py that imports adsk. It does no geometry
 math: it consumes the plain Segment/GearProfile data from gear_math and renders it.
 
-Pinion (and any) rounded tips are drawn as tangent arcs: the arc is created through
-its three points, then tangent constraints are added to the two adjacent flank lines
-so the tip meets the flanks smoothly and the sketch is properly constrained.
+Pinion rounded tips are drawn as tangent arcs (tangent to both adjacent flanks).
+Wheel tip halves are fitted splines that carry clamp_start/clamp_end flags marking
+which end must leave the adjoining flank tangentially; a tangent constraint is added
+at that end so the drawn sketch matches the smooth (corner-free) flank/tip join.
 """
 import adsk.core
 import adsk.fusion
@@ -20,8 +21,9 @@ def _pt(x_mm: float, y_mm: float) -> adsk.core.Point3D:
 
 
 def _draw_outline(sketch: adsk.fusion.Sketch, segments, cx_mm: float, cy_mm: float):
-    """Draw the connected outline. Returns a list of (kind, curve) in segment order
-    so tangency between an arc tip and its neighbouring flank lines can be added."""
+    """Draw the connected outline. Returns a list of (seg, curve) in segment order
+    so tangency between a tip (arc or spline) and its neighbouring flank lines can
+    be added afterwards."""
     lines = sketch.sketchCurves.sketchLines
     arcs = sketch.sketchCurves.sketchArcs
     splines = sketch.sketchCurves.sketchFittedSplines
@@ -31,38 +33,49 @@ def _draw_outline(sketch: adsk.fusion.Sketch, segments, cx_mm: float, cy_mm: flo
         pts = [(p[0] + cx_mm, p[1] + cy_mm) for p in seg.points]
         if seg.kind == 'line':
             curve = lines.addByTwoPoints(_pt(*pts[0]), _pt(*pts[-1]))
-            drawn.append(('line', curve))
         elif seg.kind == 'arc3':
             s, m, e = pts[0], pts[1], pts[-1]
             curve = arcs.addByThreePoints(_pt(*s), _pt(*m), _pt(*e))
-            drawn.append(('arc3', curve))
         elif seg.kind == 'spline':
             coll = adsk.core.ObjectCollection.create()
             for p in pts:
                 coll.add(_pt(*p))
             curve = splines.add(coll)
-            drawn.append(('spline', curve))
+        else:
+            continue
+        drawn.append((seg, curve))
     return drawn
 
 
-def _add_tip_tangencies(sketch: adsk.fusion.Sketch, drawn):
-    """For each arc tip flanked by line segments, constrain the arc tangent to both
-    neighbouring lines (a tangent arc with a tangent constraint on the other side).
+def _add_tangencies(sketch: adsk.fusion.Sketch, drawn):
+    """Constrain tips tangent to their neighbouring flank lines:
+      - arc3 tips (pinion cap): tangent to both adjacent lines;
+      - spline tips (wheel): tangent to the previous line if clamp_start, and/or
+        the next line if clamp_end (the smooth flank/tip joins).
     Wrapped defensively: a solver rejection on one tooth must not abort generation."""
     constraints = sketch.geometricConstraints
     n = len(drawn)
-    for i, (kind, curve) in enumerate(drawn):
-        if kind != 'arc3':
-            continue
-        prev_kind, prev_curve = drawn[(i - 1) % n]
-        next_kind, next_curve = drawn[(i + 1) % n]
-        for nb_kind, nb_curve in ((prev_kind, prev_curve), (next_kind, next_curve)):
-            if nb_kind == 'line':
-                try:
-                    constraints.addTangent(curve, nb_curve)
-                except Exception:
-                    # Over-constrained / solver rejection on a tooth: skip, keep going.
-                    pass
+
+    def tangent(a, b):
+        try:
+            constraints.addTangent(a, b)
+        except Exception:
+            # Over-constrained / solver rejection on a tooth: skip, keep going.
+            pass
+
+    for i, (seg, curve) in enumerate(drawn):
+        prev_seg, prev_curve = drawn[(i - 1) % n]
+        next_seg, next_curve = drawn[(i + 1) % n]
+        if seg.kind == 'arc3':
+            if prev_seg.kind == 'line':
+                tangent(curve, prev_curve)
+            if next_seg.kind == 'line':
+                tangent(curve, next_curve)
+        elif seg.kind == 'spline':
+            if seg.clamp_start and prev_seg.kind == 'line':
+                tangent(curve, prev_curve)
+            if seg.clamp_end and next_seg.kind == 'line':
+                tangent(curve, next_curve)
 
 
 def draw_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
@@ -87,7 +100,7 @@ def draw_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
         sketch.isComputeDeferred = False
 
     # Tangencies added after the solver is live so it can apply them.
-    _add_tip_tangencies(sketch, drawn)
+    _add_tangencies(sketch, drawn)
     return sketch
 
 
