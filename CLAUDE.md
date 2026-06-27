@@ -46,10 +46,14 @@ Two deliberately separated layers:
 - **Geometry and sketch-constraint work is collaborative, one step at a time** — propose a single
   step, the user tests it in Fusion and confirms before the next; don't batch changes. Research the
   Fusion API (WebFetch the help pages) before using it — several plausible-but-wrong calls exist.
-- **Releases are automated** by python-semantic-release on push to `main`, driven by **Conventional
-  Commits** (`feat:` → minor, `fix:` → patch, `BREAKING CHANGE` → major). It stamps the version into
-  `PerfectPrintGears.manifest` and writes `CHANGELOG.md` — don't edit those by hand. Config:
-  `pyproject.toml`; CI: `.github/workflows/ci.yml`.
+- **Write every commit in [Conventional Commits](https://www.conventionalcommits.org) format**
+  (`type(scope): summary`, e.g. `feat(fusion): ...`, `fix(engine): ...`). Releases are automated by
+  python-semantic-release on push to `main` and are driven entirely by these messages: `feat:` → minor,
+  `fix:` → patch, `BREAKING CHANGE:` (in body/footer) → major; other types (`docs`, `chore`, `ci`,
+  `test`, `refactor`) don't bump the version. Commits without a recognized type are omitted from the
+  changelog and trigger no release. On release PSR stamps the version into `PerfectPrintGears.manifest`
+  and writes `CHANGELOG.md` — don't edit those by hand. Config: `pyproject.toml`; CI:
+  `.github/workflows/ci.yml`.
 
 ## Keep docs in sync
 
