@@ -95,10 +95,9 @@ def _build_inputs(inputs):
                          adsk.core.ValueInput.createByReal(s['tooth_fraction']))
 
     futil.log('build: featureWidthInfo')
-    # Feature width is DERIVED -> a disabled value field (info only), not editable.
-    fwi = inputs.addValueInput('featureWidthInfo', 'Feature width (mm)', 'mm',
-                               adsk.core.ValueInput.createByReal(0.0))
-    fwi.isEnabled = False
+    # Feature width is DERIVED -> a read-only text box (info only), not editable.
+    fwi = inputs.addTextBoxCommandInput('featureWidthInfo', 'Tooth width', '', 1, True)
+    fwi.isFullWidth = False
 
     futil.log('build: clearance')
     # Text-list dropdown (a button row would require a per-item icon resource).
@@ -138,12 +137,12 @@ def _build_inputs(inputs):
 
 
 def _update_feature_width_display(inputs):
-    """Recompute the derived feature width into the disabled value field (mm->cm)."""
+    """Recompute the derived feature width into the read-only text box (mm)."""
     try:
         module_mm = inputs.itemById('module').value / 0.1
         tf = inputs.itemById('toothFraction').value
         fw = tf * math.pi * module_mm
-        inputs.itemById('featureWidthInfo').value = fw * 0.1
+        inputs.itemById('featureWidthInfo').text = f'{fw:.3f} mm'
     except Exception:
         pass
 

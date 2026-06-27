@@ -51,8 +51,8 @@ Open **Solid → Create → Generate Perfect Print Gears** and set:
 | **Wheel teeth / Pinion teeth** | Tooth counts (pinion ≥ 6, wheel ≥ pinion). |
 | **Gear ratio** *(read-only)* | Displays the resulting ratio as a decimal and reduced integer form, e.g. `3.33 : 1 (10 : 3)`. Updates live as tooth counts change. |
 | **Module (mm)** | Sets the tooth size / pitch. `circular pitch = π · module`. |
-| **Tooth fraction** | Tooth width as a fraction of the circular pitch (0–0.5). **This is the backlash knob:** 0.5 = equal tooth and space; below 0.5 thins the teeth for circumferential play. The resulting **feature width** is shown read-only. |
-| **Clearance** | Radial tip-to-root play (absolute mm or % of feature width). Independent of tooth fraction. |
+| **Tooth fraction** | Tooth width as a fraction of the circular pitch (0–0.5). **This is the backlash knob:** 0.5 = equal tooth and space; below 0.5 thins the teeth for circumferential play. The resulting **tooth width** is shown read-only. |
+| **Clearance** | Radial tip-to-root play (absolute mm or % of tooth width). Independent of tooth fraction. |
 | **Advanced → Addendum / Dedendum factor** | Optional root-depth scaling. |
 | **Advanced → Tip spline points** | Number of fit points per wheel-tip half (default 4). |
 
