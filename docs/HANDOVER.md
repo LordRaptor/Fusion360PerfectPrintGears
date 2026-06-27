@@ -193,14 +193,19 @@ mode — see §7). Every constraint/dimension call is wrapped in try/except + lo
 3. ~~Wire phase/rotation into the dialog~~ — **dropped** (superseded by the free-swing pinion).
 4. ~~Task 18 acceptance checklist / extrude-one-tooth checks~~ — effectively satisfied.
 
-### Current work — editable, module-linked tooth width (started 2026-06-27)
-Make **tooth width an editable input** again (it is currently a read-only derived display).
-Module and tooth width become mutually linked (edit one → the other updates), with **tooth
-fraction** kept as a third editable field; all three are tied by
-`tooth_width = tooth_fraction · π · module`. The three live in a new **"Tooth sizing"**
-dialog group. Pure-engine helpers (`tooth_width_from_module`, `module_from_tooth_width`) carry
-the math; persistence and geometry are unchanged (source of truth stays module + tooth_fraction).
-Spec: `docs/superpowers/specs/2026-06-27-editable-tooth-width-design.md`.
+### Editable, module-linked tooth width — DONE (PR #9, 2026-06-27)
+Tooth width is now an **editable input** again (was a read-only derived display). Module, tooth
+width, and **tooth fraction** are three mutually-linked editable fields in a new **"Tooth
+sizing"** dialog group, tied by `tooth_width = tooth_fraction · π · module`: edit module or
+tooth fraction → width recomputes; edit width → module back-solves (tooth fraction pinned).
+Pure-engine helpers (`tooth_width_from_module`, `module_from_tooth_width`) carry the math;
+persistence and geometry are unchanged (source of truth stays module + tooth_fraction). A
+reentrancy guard (`_linking`) prevents the set-value feedback loop. Also in PR #9: the inert
+**addendum factor** input was removed (never read by the engine). Gotcha hit + fixed:
+`InputChangedEventArgs.inputs` returns the changed input's immediate collection (group children,
+not root) — normalize via `args.inputs.command.commandInputs` (see `fusion-addin-gotchas`
+memory). Spec: `docs/superpowers/specs/2026-06-27-editable-tooth-width-design.md`;
+plan: `docs/superpowers/plans/2026-06-27-editable-tooth-width.md`.
 
 ---
 
