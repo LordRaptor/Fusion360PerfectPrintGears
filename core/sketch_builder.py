@@ -112,14 +112,24 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
     ])
 
     gc = sketch.geometricConstraints
-    # Constraints step 2a: lock this gear's circle centres to the sketch origin.
+    # Constraints step 2a: make the three circles concentric.
     if lock_center:
+        # lock the common centre to the sketch origin (wheel sits at the origin)
         for c in (root_circle, pitch_circle, add_circle):
             try:
                 gc.addCoincident(c.centerSketchPoint, sketch.originPoint)
             except Exception:
                 futil.handle_error('addCoincident(center, origin)')
         futil.log(f'build_gear {name}: centres coincident with origin')
+    else:
+        # tie root + addendum centres to the pitch centre (concentric); the pitch
+        # circle itself is located by the mesh tangent below
+        for c in (root_circle, add_circle):
+            try:
+                gc.addCoincident(c.centerSketchPoint, pitch_circle.centerSketchPoint)
+            except Exception:
+                futil.handle_error('addCoincident(center, pitch center)')
+        futil.log(f'build_gear {name}: circles concentric')
 
     # Constraints step 2b: locate this gear by meshing -- reference an external
     # pitch circle (e.g. the wheel's) and make this gear's pitch circle tangent
@@ -127,6 +137,12 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
     if mesh_to_pitch is not None:
         try:
             ref = sketch.include(mesh_to_pitch).item(0)
+            # MUST be construction, else the big projected circle adds profiles and
+            # breaks the extrude.
+            try:
+                ref.isConstruction = True
+            except Exception:
+                futil.handle_error('set referenced pitch circle to construction')
             gc.addTangent(pitch_circle, ref)
             futil.log(f'build_gear {name}: pitch circle tangent to referenced wheel pitch circle')
         except Exception:
