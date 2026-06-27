@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.3.0 (2026-06-27)
+
+### Features
+
+- **fusion**: Name each gear body after its sketch
+  ([`48992c0`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/48992c030ebf8235fb8715869cbd9a925789e194))
+
+
 ## v1.2.0 (2026-06-27)
 
 ### Continuous Integration
