@@ -147,8 +147,6 @@ def _build_inputs(inputs):
     adv = inputs.addGroupCommandInput('advanced', 'Advanced')
     adv.isExpanded = False
     a = adv.children
-    a.addValueInput('addendumFactor', 'Addendum factor', '',
-                    adsk.core.ValueInput.createByReal(s['addendum_factor']))
     a.addValueInput('dedendumFactor', 'Dedendum factor', '',
                     adsk.core.ValueInput.createByReal(s['dedendum_factor']))
     a.addIntegerSpinnerCommandInput('resolution', 'Tip control points', 4, 6, 1, int(s['resolution']))
@@ -242,7 +240,6 @@ def _read_inputs(inputs):
         module_mm=module_mm,
         tooth_fraction=tooth_fraction,
         clearance_mm=clearance_mm,
-        addendum_factor=adv.itemById('addendumFactor').value,
         dedendum_factor=adv.itemById('dedendumFactor').value,
         resolution=adv.itemById('resolution').value,
         tangent_join=adv.itemById('tangentJoin').value,
@@ -314,7 +311,6 @@ def _persist_settings(inputs):
         'clearance_mm': inputs.itemById('clearance').value / 0.1,
         'clearance_pct': inputs.itemById('clearancePct').value,
         'thickness_mm': inputs.itemById('thickness').value / 0.1,
-        'addendum_factor': inputs.itemById('advanced').children.itemById('addendumFactor').value,
         'dedendum_factor': inputs.itemById('advanced').children.itemById('dedendumFactor').value,
         'resolution': inputs.itemById('advanced').children.itemById('resolution').value,
         'tangent_join': inputs.itemById('advanced').children.itemById('tangentJoin').value,

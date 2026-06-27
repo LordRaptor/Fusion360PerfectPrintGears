@@ -29,7 +29,6 @@ class GearInputs:
     module_mm: float
     tooth_fraction: float = 0.5          # tooth width as a fraction of circular pitch
     clearance_mm: float = 0.1            # radial tip-to-root play
-    addendum_factor: float = 1.0         # reserved (tip is conjugate-geometric)
     dedendum_factor: float = 1.0         # scales root depth
     resolution: int = 4                  # tip control points: <=4 -> degree 3, else degree 5
     tangent_join: bool = False           # tip leaves the flank join tangent (smoother, worse fit)
