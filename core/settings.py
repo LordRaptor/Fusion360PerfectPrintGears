@@ -7,7 +7,8 @@ _DEFAULTS = {
     "module_mm": 1.5,
     # Feature width is DERIVED (= tooth_fraction * circular pitch), not stored.
     # tooth_fraction is the circumferential-backlash knob (< 0.5 thins the teeth).
-    "tooth_fraction": 0.5,
+    # Default 0.45 leaves ~10% circumferential play so the gears mesh with backlash.
+    "tooth_fraction": 0.45,
     "clearance_is_percent": False,
     "clearance_mm": 0.1,
     "clearance_pct": 5.0,
