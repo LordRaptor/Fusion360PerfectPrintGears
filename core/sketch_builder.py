@@ -41,6 +41,20 @@ def _draw_outline(sketch, segments, cx_mm, cy_mm):
             splines.add(coll)
 
 
+def _add_circle_diameters(sketch, cx_cm, cy_cm, items):
+    """Add driving diameter dimensions to circles. `items` is a list of
+    (circle, radius_cm, text_angle_rad); the text sits on the circle at that angle.
+    Defensive: a solver rejection on one dimension must not abort the build."""
+    dims = sketch.sketchDimensions
+    for circle, r_cm, ang in items:
+        tp = adsk.core.Point3D.create(cx_cm + r_cm * math.cos(ang),
+                                      cy_cm + r_cm * math.sin(ang), 0.0)
+        try:
+            dims.addDiameterDimension(circle, tp, True)
+        except Exception:
+            futil.handle_error('addDiameterDimension')
+
+
 def _nearest_profile(profiles, cx_cm, cy_cm):
     """Return (disk_profile, [other_profiles]) split by centroid distance to the
     gear centre. The disk profile's centroid is at the centre; the tooth tab's is
@@ -80,13 +94,21 @@ def build_gear(component: adsk.fusion.Component, profile: gear_math.GearProfile,
         # Root circle REAL (bounds the disk profile + serves as the pattern axis);
         # pitch/addendum drawn as construction references.
         root_circle = circles.addByCenterRadius(_pt(cx, cy), profile.root_radius * MM_TO_CM)
-        for r in (profile.pitch_radius, profile.addendum_radius):
-            c = circles.addByCenterRadius(_pt(cx, cy), r * MM_TO_CM)
-            c.isConstruction = True
+        pitch_circle = circles.addByCenterRadius(_pt(cx, cy), profile.pitch_radius * MM_TO_CM)
+        pitch_circle.isConstruction = True
+        add_circle = circles.addByCenterRadius(_pt(cx, cy), profile.addendum_radius * MM_TO_CM)
+        add_circle.isConstruction = True
         tooth = gear_math.array_tooth(profile.tooth_segments, 1, profile.base_angle)
         _draw_outline(sketch, tooth, cx, cy)
     finally:
         sketch.isComputeDeferred = False
+
+    # Constraints step 1: lock the three circle diameters (driving dimensions).
+    _add_circle_diameters(sketch, cx * MM_TO_CM, cy * MM_TO_CM, [
+        (root_circle, profile.root_radius * MM_TO_CM, math.radians(45)),
+        (pitch_circle, profile.pitch_radius * MM_TO_CM, math.radians(90)),
+        (add_circle, profile.addendum_radius * MM_TO_CM, math.radians(135)),
+    ])
 
     futil.log(f'build_gear {name}: profiles={sketch.profiles.count}')
     disk_prof, tooth_profs = _nearest_profile(sketch.profiles, cx * MM_TO_CM, cy * MM_TO_CM)
