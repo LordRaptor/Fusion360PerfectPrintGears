@@ -2,8 +2,8 @@
 import json
 
 _DEFAULTS = {
-    "wheel_teeth": 50,
-    "pinion_teeth": 10,
+    "driving_teeth": 50,
+    "driven_teeth": 10,
     "module_mm": 1.5,
     # Feature width is DERIVED (= tooth_fraction * circular pitch), not stored.
     # tooth_fraction is the circumferential-backlash knob (< 0.5 thins the teeth).
@@ -14,7 +14,7 @@ _DEFAULTS = {
     "clearance_pct": 5.0,
     "thickness_mm": 5.0,          # extrude depth
     "dedendum_factor": 1.0,
-    "resolution": 4,          # wheel-tip Bezier: <=4 -> degree 3, else degree 5
+    "resolution": 4,          # driving-tip Bezier: <=4 -> degree 3, else degree 5
     "tangent_join": False,    # tip leaves the flank join tangent (smoother, worse fit)
 }
 

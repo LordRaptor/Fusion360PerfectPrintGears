@@ -5,7 +5,7 @@ from core import gear_math as gm
 
 
 def _valid_inputs(**over):
-    base = dict(wheel_teeth=50, pinion_teeth=10, module_mm=1.5,
+    base = dict(driving_teeth=50, driven_teeth=10, module_mm=1.5,
                 tooth_fraction=0.5, clearance_mm=0.1, resolution=4)
     base.update(over)
     return gm.GearInputs(**base)
@@ -15,8 +15,8 @@ def _valid_inputs(**over):
 def test_derived_geometry_matches_hand_calc():
     inp = _valid_inputs(module_mm=1.0, tooth_fraction=0.5)
     geo = gm.derive_geometry(inp)
-    assert geo.pitch_radius_wheel == pytest.approx(25.0)
-    assert geo.pitch_radius_pinion == pytest.approx(5.0)
+    assert geo.pitch_radius_driving == pytest.approx(25.0)
+    assert geo.pitch_radius_driven == pytest.approx(5.0)
     assert geo.center_distance == pytest.approx(30.0)
     assert geo.ratio == pytest.approx(5.0)
     assert geo.circular_pitch == pytest.approx(math.pi)
@@ -57,14 +57,17 @@ def test_validate_accepts_good_inputs():
     gm.validate_inputs(_valid_inputs(tooth_fraction=0.4))
 
 
-def test_validate_rejects_low_pinion_teeth():
-    with pytest.raises(ValueError, match="pinion teeth"):
-        gm.validate_inputs(_valid_inputs(pinion_teeth=5))
+def test_validate_rejects_low_teeth_on_either_gear():
+    with pytest.raises(ValueError, match="at least 6"):
+        gm.validate_inputs(_valid_inputs(driven_teeth=5))
+    with pytest.raises(ValueError, match="at least 6"):
+        gm.validate_inputs(_valid_inputs(driving_teeth=5))
 
 
-def test_validate_rejects_wheel_smaller_than_pinion():
-    with pytest.raises(ValueError, match="wheel teeth"):
-        gm.validate_inputs(_valid_inputs(wheel_teeth=8, pinion_teeth=10))
+def test_validate_accepts_reduction_driving_smaller_than_driven():
+    # The whole point: the driving (tip) gear may now be smaller than the driven gear.
+    gm.validate_inputs(_valid_inputs(driving_teeth=10, driven_teeth=40))
+    gm.validate_inputs(_valid_inputs(driving_teeth=20, driven_teeth=20))  # 1:1
 
 
 def test_validate_rejects_nonpositive_module():
@@ -109,29 +112,29 @@ def test_foot_of_perpendicular():
     assert f == pytest.approx((1.0, 0.0))
 
 
-# --------------------------------------------------------- wheel-tip conjugate
-def test_contacting_flank_meets_wheel_flank_at_pitch_circle():
-    # The pinion tooth angle alpha = 2*asin(half_w/Rp) places its top flank's
-    # pitch endpoint at Q = (C - sqrt(Rp^2 - half_w^2), -half_w) on the pinion
-    # pitch circle, where the wheel BOTTOM flank ends.
+# --------------------------------------------------------- driving-tip conjugate
+def test_contacting_flank_meets_driving_flank_at_pitch_circle():
+    # The driven tooth angle alpha = 2*asin(half_w/Rp) places its top flank's
+    # pitch endpoint at Q = (C - sqrt(Rp^2 - half_w^2), -half_w) on the driven
+    # pitch circle, where the driving BOTTOM flank ends.
     inp = _valid_inputs()
     geo = gm.derive_geometry(inp)
     p_pitch, _ = gm._contacting_flank(geo)
-    xq = geo.center_distance - math.sqrt(geo.pitch_radius_pinion ** 2 - geo.half_w ** 2)
+    xq = geo.center_distance - math.sqrt(geo.pitch_radius_driven ** 2 - geo.half_w ** 2)
     assert p_pitch == pytest.approx((xq, -geo.half_w), abs=1e-9)
 
 
-def test_wheel_tip_spans_join_to_apex():
+def test_driving_tip_spans_join_to_apex():
     inp = _valid_inputs()
     geo = gm.derive_geometry(inp)
-    pts = gm.wheel_tip_points(inp, geo, samples=80)
+    pts = gm.driving_tip_points(inp, geo, samples=80)
     assert len(pts) == 80
     # starts at the flank level (y = -half_w), ends on the centerline apex (y = 0)
     assert pts[0][1] == pytest.approx(-geo.half_w, abs=1e-3)
     assert pts[-1][1] == pytest.approx(0.0, abs=1e-12)
     # apex is a real addendum: outside the pitch circle, below a sane ceiling
     apex_r = math.hypot(*pts[-1])
-    assert geo.pitch_radius_wheel < apex_r < geo.pitch_radius_wheel + 2.0 * inp.module_mm
+    assert geo.pitch_radius_driving < apex_r < geo.pitch_radius_driving + 2.0 * inp.module_mm
     # x grows monotonically from join toward the apex
     xs = [p[0] for p in pts]
     assert all(xs[i + 1] >= xs[i] - 1e-9 for i in range(len(xs) - 1))
@@ -144,22 +147,22 @@ def test_envelope_perp_equals_consecutive_intersection():
     inp = _valid_inputs()
     geo = gm.derive_geometry(inp)
     base = gm._contacting_flank(geo)
-    tp = 2.0 * math.pi / inp.pinion_teeth
+    tp = 2.0 * math.pi / inp.driven_teeth
     for frac in (-0.2, -0.1, 0.0, 0.1, 0.2):
         tau = frac * tp
-        c = gm.wheel_contact_point(geo, base, tau)
-        l1 = gm.flank_in_wheel_frame(geo, base, tau)
-        l2 = gm.flank_in_wheel_frame(geo, base, tau + 1e-4)
+        c = gm.driving_contact_point(geo, base, tau)
+        l1 = gm.flank_in_driving_frame(geo, base, tau)
+        l2 = gm.flank_in_driving_frame(geo, base, tau + 1e-4)
         ip = gm.line_intersection(l1[0], l1[1], l2[0], l2[1])
         assert ip is not None
         assert math.hypot(ip[0] - c[0], ip[1] - c[1]) < 0.02
 
 
-# ----------------------------------------------------------------- wheel tooth
-def test_wheel_tooth_structure_and_continuity():
+# ----------------------------------------------------------------- driving tooth
+def test_driving_tooth_structure_and_continuity():
     inp = _valid_inputs(resolution=4)
     geo = gm.derive_geometry(inp)
-    segs = gm.build_wheel_tooth(inp, geo)
+    segs = gm.build_driving_tooth(inp, geo)
 
     assert [s.kind for s in segs] == ['line', 'cpspline', 'cpspline', 'line']
     # default resolution -> degree-3 Bezier (4 control points) per tip half
@@ -174,37 +177,37 @@ def test_wheel_tooth_structure_and_continuity():
     assert apex[1] == pytest.approx(0.0, abs=1e-12)
     # real addendum
     apex_r = math.hypot(*apex)
-    assert geo.pitch_radius_wheel < apex_r < geo.pitch_radius_wheel + 2.0 * inp.module_mm
+    assert geo.pitch_radius_driving < apex_r < geo.pitch_radius_driving + 2.0 * inp.module_mm
 
 
-def test_wheel_tooth_flanks_at_half_width_no_clearance_narrowing():
-    # Backlash now comes from the tooth fraction, NOT from narrowing the wheel
+def test_driving_tooth_flanks_at_half_width_no_clearance_narrowing():
+    # Backlash now comes from the tooth fraction, NOT from narrowing the driving
     # tooth -- the flanks sit exactly at +/- half_w regardless of clearance.
     inp = _valid_inputs(clearance_mm=0.3)
     geo = gm.derive_geometry(inp)
-    segs = gm.build_wheel_tooth(inp, geo)
+    segs = gm.build_driving_tooth(inp, geo)
     for pt in segs[3].points:                 # upper flank
         assert pt[1] == pytest.approx(geo.half_w, abs=1e-12)
     for pt in segs[0].points:                 # lower flank
         assert pt[1] == pytest.approx(-geo.half_w, abs=1e-12)
 
 
-def test_wheel_tooth_resolution_selects_degree5():
+def test_driving_tooth_resolution_selects_degree5():
     # resolution > 4 selects a degree-5 Bezier (6 control points) per tip half
     inp = _valid_inputs(resolution=6)
     geo = gm.derive_geometry(inp)
-    segs = gm.build_wheel_tooth(inp, geo)
+    segs = gm.build_driving_tooth(inp, geo)
     assert segs[1].degree == 5
     assert len(segs[1].points) == 6
 
 
-def test_wheel_tip_densifies_close_to_conjugate_locus():
+def test_driving_tip_densifies_close_to_conjugate_locus():
     # the drawn tip (densified Bezier) tracks the true conjugate locus closely
     inp = _valid_inputs(resolution=4)
     geo = gm.derive_geometry(inp)
-    segs = gm.build_wheel_tooth(inp, geo)
+    segs = gm.build_driving_tooth(inp, geo)
     dense = gm.densify_segments([segs[1]], n_spline=2000)   # fine, to measure true dev
-    locus = _wheel_tip_locus(inp)
+    locus = _driving_tip_locus(inp)
     worst = 0.0
     for q in locus:
         worst = max(worst, min(math.hypot(q[0] - d[0], q[1] - d[1]) for d in dense))
@@ -228,9 +231,9 @@ def test_bezier_curve_samples_n_plus_one_points():
     assert pts[-1] == pytest.approx((2.0, 0.0))
 
 
-def _wheel_tip_locus(inp):
+def _driving_tip_locus(inp):
     geo = gm.derive_geometry(inp)
-    locus = gm.wheel_tip_points(inp, geo)
+    locus = gm.driving_tip_points(inp, geo)
     hw = geo.half_w
     locus[0] = (locus[0][0], -hw)
     locus[-1] = (locus[-1][0], 0.0)
@@ -247,7 +250,7 @@ def _max_dev_from_locus(ctrl, locus):
 
 def test_fit_tip_bezier_degree3_tracks_locus_within_5um():
     inp = _valid_inputs(resolution=4)
-    locus = _wheel_tip_locus(inp)
+    locus = _driving_tip_locus(inp)
     ctrl = gm.fit_tip_bezier(locus, degree=3, tangent_join=False)
     assert len(ctrl) == 4
     assert ctrl[0] == pytest.approx(locus[0], abs=1e-12)
@@ -257,7 +260,7 @@ def test_fit_tip_bezier_degree3_tracks_locus_within_5um():
 
 def test_fit_tip_bezier_degree5_has_six_points_and_tracks_tightly():
     inp = _valid_inputs(resolution=6)
-    locus = _wheel_tip_locus(inp)
+    locus = _driving_tip_locus(inp)
     ctrl = gm.fit_tip_bezier(locus, degree=5, tangent_join=False)
     assert len(ctrl) == 6
     assert _max_dev_from_locus(ctrl, locus) < 0.005
@@ -265,7 +268,7 @@ def test_fit_tip_bezier_degree5_has_six_points_and_tracks_tightly():
 
 def test_fit_tip_bezier_tangent_join_leaves_join_horizontal():
     inp = _valid_inputs(resolution=4)
-    locus = _wheel_tip_locus(inp)
+    locus = _driving_tip_locus(inp)
     ctrl = gm.fit_tip_bezier(locus, degree=3, tangent_join=True)
     # horizontal leave at the join: control point 1 shares the join's y
     assert ctrl[1][1] == pytest.approx(ctrl[0][1], abs=1e-12)
@@ -273,16 +276,16 @@ def test_fit_tip_bezier_tangent_join_leaves_join_horizontal():
 
 def test_fit_tip_bezier_rejects_unsupported_degree():
     inp = _valid_inputs()
-    locus = _wheel_tip_locus(inp)
+    locus = _driving_tip_locus(inp)
     with pytest.raises(ValueError):
         gm.fit_tip_bezier(locus, degree=4)
 
 
-# ---------------------------------------------------------------- pinion tooth
-def test_pinion_tooth_arc_tip_and_constant_width_flanks():
+# ---------------------------------------------------------------- driven tooth
+def test_driven_tooth_arc_tip_and_constant_width_flanks():
     inp = _valid_inputs()
     geo = gm.derive_geometry(inp)
-    segs = gm.build_pinion_tooth(inp, geo)
+    segs = gm.build_driven_tooth(inp, geo)
 
     kinds = [s.kind for s in segs]
     assert kinds.count('arc3') == 1
@@ -291,8 +294,8 @@ def test_pinion_tooth_arc_tip_and_constant_width_flanks():
     flanks = [s for s in segs if s.kind == 'line']
     ys = [pt[1] for s in flanks for pt in s.points]
     assert max(ys) - min(ys) == pytest.approx(geo.feature_width_mm, abs=1e-9)
-    # flanks end ON the pinion pitch circle; cap bulges half_w beyond
-    flank_top_x = math.sqrt(geo.pitch_radius_pinion ** 2 - geo.half_w ** 2)
+    # flanks end ON the driven pitch circle; cap bulges half_w beyond
+    flank_top_x = math.sqrt(geo.pitch_radius_driven ** 2 - geo.half_w ** 2)
     arc = [s for s in segs if s.kind == 'arc3'][0]
     assert arc.points[0][0] == pytest.approx(flank_top_x, abs=1e-9)
     assert arc.points[1] == pytest.approx((flank_top_x + geo.half_w, 0.0), abs=1e-9)
@@ -321,55 +324,59 @@ def test_build_gear_pair_places_centers_for_meshing():
     pair = gm.build_gear_pair(inp)
     rw, rp = 1.5 * 50 / 2.0, 1.5 * 10 / 2.0
     assert pair.center_distance == pytest.approx(rw + rp)
-    assert pair.wheel.center == pytest.approx((0.0, 0.0))
-    assert pair.pinion.center == pytest.approx((rw + rp, 0.0))
-    assert len(pair.wheel.segments) == 50 * 5      # 4 tooth segments + 1 root bridge
-    assert len(pair.pinion.segments) == 10 * 4     # 3 tooth segments + 1 root bridge
-    assert pair.wheel.pitch_radius == pytest.approx(rw)
-    assert pair.pinion.pitch_radius == pytest.approx(rp)
+    assert pair.driving.center == pytest.approx((0.0, 0.0))
+    assert pair.driven.center == pytest.approx((rw + rp, 0.0))
+    assert len(pair.driving.segments) == 50 * 5      # 4 tooth segments + 1 root bridge
+    assert len(pair.driven.segments) == 10 * 4     # 3 tooth segments + 1 root bridge
+    assert pair.driving.pitch_radius == pytest.approx(rw)
+    assert pair.driven.pitch_radius == pytest.approx(rp)
 
 
 def test_peterson_50_10_example_is_sane():
     inp = _valid_inputs(resolution=6)
     pair = gm.build_gear_pair(inp)
-    assert pair.wheel.pitch_radius + pair.pinion.pitch_radius == \
+    assert pair.driving.pitch_radius + pair.driven.pitch_radius == \
         pytest.approx(pair.center_distance)
-    assert pair.wheel.addendum_radius > pair.wheel.pitch_radius
-    assert pair.wheel.addendum_radius < pair.wheel.pitch_radius + 2.0 * inp.module_mm
-    assert pair.wheel.root_radius < pair.wheel.pitch_radius
-    assert pair.pinion.root_radius < pair.pinion.pitch_radius
-    for s in pair.wheel.segments:
+    assert pair.driving.addendum_radius > pair.driving.pitch_radius
+    assert pair.driving.addendum_radius < pair.driving.pitch_radius + 2.0 * inp.module_mm
+    assert pair.driving.root_radius < pair.driving.pitch_radius
+    assert pair.driven.root_radius < pair.driven.pitch_radius
+    for s in pair.driving.segments:
         for (x, y) in s.points:
             assert math.isfinite(x) and math.isfinite(y)
-            assert math.hypot(x, y) <= pair.wheel.addendum_radius + 1e-6
+            assert math.hypot(x, y) <= pair.driving.addendum_radius + 1e-6
 
 
 def test_other_ratio_60_8_builds():
-    inp = _valid_inputs(wheel_teeth=60, pinion_teeth=8, module_mm=0.8,
+    inp = _valid_inputs(driving_teeth=60, driven_teeth=8, module_mm=0.8,
                         tooth_fraction=0.4, clearance_mm=0.05, resolution=6)
     pair = gm.build_gear_pair(inp)
-    assert len(pair.wheel.segments) == 60 * 5
-    assert len(pair.pinion.segments) == 8 * 4
+    assert len(pair.driving.segments) == 60 * 5
+    assert len(pair.driven.segments) == 8 * 4
     assert pair.center_distance == pytest.approx(0.8 * (60 + 8) / 2)
 
 
 def test_gear_outlines_form_single_closed_loop():
     inp = _valid_inputs()
     pair = gm.build_gear_pair(inp)
-    for prof in (pair.wheel, pair.pinion):
+    for prof in (pair.driving, pair.driven):
         segs = prof.segments
         for cur, nxt in zip(segs, segs[1:] + segs[:1]):
             assert cur.points[-1] == pytest.approx(nxt.points[0], abs=1e-6)
 
 
 # ------------------------------------------------------------------ ratio format
-def test_format_ratio_integer_reduction():
-    assert gm.format_ratio(60, 12) == "5.00 : 1 (5 : 1)"
+def test_format_ratio_step_up():
+    assert gm.format_ratio(60, 12) == "5 : 1 (step-up)"
 
 
-def test_format_ratio_non_integer():
-    assert gm.format_ratio(50, 15) == "3.33 : 1 (10 : 3)"
+def test_format_ratio_reduction():
+    assert gm.format_ratio(10, 40) == "1 : 4 (reduction)"
 
 
-def test_format_ratio_equal_counts():
-    assert gm.format_ratio(20, 20) == "1.00 : 1 (1 : 1)"
+def test_format_ratio_non_integer_reduces():
+    assert gm.format_ratio(50, 15) == "10 : 3 (step-up)"
+
+
+def test_format_ratio_equal_counts_is_one_to_one():
+    assert gm.format_ratio(20, 20) == "1 : 1"

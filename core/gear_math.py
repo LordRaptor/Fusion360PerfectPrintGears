@@ -3,12 +3,12 @@
 no third-party deps (no numpy) -- Fusion's bundled Python may not have them.
 
 All lengths are in millimeters. The caller (Fusion layer) converts mm -> cm.
-Coordinate frame: wheel center at origin (0,0); pinion center at (center_distance, 0).
+Coordinate frame: driving gear at origin (0,0); driven at (center_distance, 0).
 
 Conjugation method (validated; see docs/superpowers/specs §4.3 and tmp/peterson_*.py):
-one kinematic model drives both generation and verification -- pinion rotates +tau
-about O_p, wheel rotates -tau/ratio about O_w. The wheel tip is the locus of the
-foot of the perpendicular from the pitch point onto the straight pinion flank
+one kinematic model drives both generation and verification -- driven rotates +tau
+about O_p, driving rotates -tau/ratio about O_w. The driving tip is the locus of the
+foot of the perpendicular from the pitch point onto the straight driven flank
 (exact for a straight flank), trimmed flank->apex and mirrored, represented as a
 control-point (Bezier) spline fitted to the envelope (see fit_tip_bezier).
 """
@@ -24,8 +24,8 @@ Point = Tuple[float, float]
 # ============================================================ data + geometry
 @dataclass
 class GearInputs:
-    wheel_teeth: int
-    pinion_teeth: int
+    driving_teeth: int
+    driven_teeth: int
     module_mm: float
     tooth_fraction: float = 0.5          # tooth width as a fraction of circular pitch
     clearance_mm: float = 0.1            # radial tip-to-root play
@@ -36,25 +36,25 @@ class GearInputs:
 
 @dataclass
 class DerivedGeometry:
-    pitch_radius_wheel: float
-    pitch_radius_pinion: float
+    pitch_radius_driving: float
+    pitch_radius_driven: float
     center_distance: float
     ratio: float
     circular_pitch: float
-    feature_width_mm: float              # derived = tooth_fraction * circular_pitch
+    feature_width_mm: float              # derived = tooth_fraction * circular pitch
     half_w: float
 
 
 def derive_geometry(inp: GearInputs) -> DerivedGeometry:
-    rw = inp.module_mm * inp.wheel_teeth / 2.0
-    rp = inp.module_mm * inp.pinion_teeth / 2.0
+    rw = inp.module_mm * inp.driving_teeth / 2.0
+    rp = inp.module_mm * inp.driven_teeth / 2.0
     cp = math.pi * inp.module_mm
     fw = tooth_width_from_module(inp.module_mm, inp.tooth_fraction)
     return DerivedGeometry(
-        pitch_radius_wheel=rw,
-        pitch_radius_pinion=rp,
+        pitch_radius_driving=rw,
+        pitch_radius_driven=rp,
         center_distance=rw + rp,
-        ratio=inp.wheel_teeth / inp.pinion_teeth,
+        ratio=inp.driving_teeth / inp.driven_teeth,
         circular_pitch=cp,
         feature_width_mm=fw,
         half_w=fw / 2.0,
@@ -75,20 +75,20 @@ def module_from_tooth_width(width_mm: float, tooth_fraction: float) -> float:
     return width_mm / (tooth_fraction * math.pi)
 
 
-MIN_PINION_TEETH = 6
+MIN_TEETH = 6
 
 
 def validate_inputs(inp: GearInputs) -> None:
-    """Raise ValueError with a human-readable message if inputs are unusable."""
-    if inp.pinion_teeth < MIN_PINION_TEETH:
-        raise ValueError(f"pinion teeth must be at least {MIN_PINION_TEETH}")
-    if inp.wheel_teeth < inp.pinion_teeth:
-        raise ValueError("wheel teeth must be >= pinion teeth")
+    """Raise ValueError with a human-readable message if inputs are unusable.
+
+    Either gear may be the larger one: the DRIVING gear carries the conjugate tip and
+    the DRIVEN gear the straight flanks, regardless of size, so reductions (driving <
+    driven) and 1:1 are valid -- only a per-gear minimum tooth count and the
+    tooth-width-fits-the-smaller-gear bound apply."""
+    if inp.driving_teeth < MIN_TEETH or inp.driven_teeth < MIN_TEETH:
+        raise ValueError(f"both gears must have at least {MIN_TEETH} teeth")
     if inp.module_mm <= 0:
         raise ValueError("module must be greater than 0")
-    # Feature width is DERIVED from the tooth fraction, so the old "teeth overlap"
-    # case is structurally impossible; instead bound the fraction. At 0.5 the teeth
-    # exactly fill the pitch (clearance provides the gap); above 0.5 there is no gap.
     if not (0.0 < inp.tooth_fraction <= 0.5):
         raise ValueError("tooth fraction must be between 0 and 0.5")
     geo = derive_geometry(inp)
@@ -96,17 +96,21 @@ def validate_inputs(inp: GearInputs) -> None:
         raise ValueError("clearance must be >= 0")
     if inp.clearance_mm >= geo.feature_width_mm:
         raise ValueError("clearance must be less than the feature width")
-    if geo.half_w >= geo.pitch_radius_pinion:
-        raise ValueError("feature width is too large for the pinion size")
+    smaller_pitch_radius = min(geo.pitch_radius_driving, geo.pitch_radius_driven)
+    if geo.half_w >= smaller_pitch_radius:
+        raise ValueError("feature width is too large for the smaller gear")
 
 
-def format_ratio(wheel_teeth: int, pinion_teeth: int) -> str:
-    """Human-readable reduction ratio: decimal to 2 dp plus the GCD-reduced
-    integer pair, e.g. format_ratio(50, 15) == "3.33 : 1 (10 : 3)"."""
-    decimal = wheel_teeth / pinion_teeth
-    g = math.gcd(int(wheel_teeth), int(pinion_teeth))
-    rw, rp = int(wheel_teeth) // g, int(pinion_teeth) // g
-    return f"{decimal:.2f} : 1 ({rw} : {rp})"
+def format_ratio(driving_teeth: int, driven_teeth: int) -> str:
+    """Human-readable tooth ratio with direction. The GCD-reduced pair a:b of
+    driving:driven, plus a word -- driving > driven is a step-up, driving < driven a
+    reduction, equal is 1:1 (e.g. format_ratio(10, 40) == "1 : 4 (reduction)")."""
+    g = math.gcd(int(driving_teeth), int(driven_teeth))
+    a, b = int(driving_teeth) // g, int(driven_teeth) // g
+    if driving_teeth == driven_teeth:
+        return f"{a} : {b}"                      # "1 : 1"
+    word = "step-up" if driving_teeth > driven_teeth else "reduction"
+    return f"{a} : {b} ({word})"
 
 
 # ===================================================================== 2D math
@@ -148,7 +152,7 @@ def _polar(r: float, ang: float) -> Point:
 
 
 # ============================================================= bezier (tip)
-# A control-point (Bezier) spline represents the wheel tip in the sketch: unlike a
+# A control-point (Bezier) spline represents the driving tip in the sketch: unlike a
 # fitted spline it has no per-point tangent handles, so constraining every control
 # point fully constrains it -- which lets the tip rotate with the centerline frame.
 # Fusion only accepts degree 3 (4 control points) or 5 (6); a single Bezier of
@@ -260,7 +264,7 @@ def fit_tip_bezier(locus: List[Point], degree: int = 3,
     return [P0] + [(xs[i], ys[i]) for i in range(degree - 1)] + [Pd]
 
 
-# ============================================ wheel-tip conjugate envelope
+# ============================================ driving-tip conjugate envelope
 def _arc3_curve(p1: Point, p2: Point, p3: Point, n: int = 24) -> List[Point]:
     """Sample the circular arc through 3 points, passing THROUGH the mid point p2."""
     (x1, y1), (x2, y2), (x3, y3) = p1, p2, p3
@@ -284,11 +288,11 @@ def _arc3_curve(p1: Point, p2: Point, p3: Point, n: int = 24) -> List[Point]:
 
 
 def _contacting_flank(geo: DerivedGeometry) -> Tuple[Point, Point]:
-    """Two points on the contacting pinion flank (top flank) at the reference
-    instant, in world coords. The pinion tooth is placed by alpha = 2*asin(half_w/Rp)
-    so its top flank meets the wheel bottom flank at Q on the pinion pitch circle."""
+    """Two points on the contacting driven flank (top flank) at the reference
+    instant, in world coords. The driven tooth is placed by alpha = 2*asin(half_w/Rp)
+    so its top flank meets the driving bottom flank at Q on the driven pitch circle."""
     C = geo.center_distance
-    Rp = geo.pitch_radius_pinion
+    Rp = geo.pitch_radius_driven
     hw = geo.half_w
     Op = (C, 0.0)
     xq = C - math.sqrt(Rp ** 2 - hw ** 2)
@@ -300,9 +304,9 @@ def _contacting_flank(geo: DerivedGeometry) -> Tuple[Point, Point]:
     return (p_pitch, p_in)
 
 
-def flank_in_wheel_frame(geo: DerivedGeometry, base: Tuple[Point, Point],
-                         tau: float) -> Tuple[Point, Point]:
-    """The contacting pinion flank at mesh parameter tau, expressed in the wheel
+def flank_in_driving_frame(geo: DerivedGeometry, base: Tuple[Point, Point],
+                           tau: float) -> Tuple[Point, Point]:
+    """The contacting driven flank at mesh parameter tau, expressed in the driving
     frame: rotate +tau about O_p, then +tau/ratio about O_w."""
     Op = (geo.center_distance, 0.0)
     Ow = (0.0, 0.0)
@@ -312,38 +316,38 @@ def flank_in_wheel_frame(geo: DerivedGeometry, base: Tuple[Point, Point],
     return (p0, p1)
 
 
-def wheel_contact_point(geo: DerivedGeometry, base: Tuple[Point, Point],
-                        tau: float) -> Point:
-    """Wheel-tip point at parameter tau = foot of perpendicular from the pitch
-    point onto the (world) flank, carried into the wheel frame."""
+def driving_contact_point(geo: DerivedGeometry, base: Tuple[Point, Point],
+                          tau: float) -> Point:
+    """Driving-tip point at parameter tau = foot of perpendicular from the pitch
+    point onto the (world) flank, carried into the driving frame."""
     Op = (geo.center_distance, 0.0)
     Ow = (0.0, 0.0)
-    P = (geo.pitch_radius_wheel, 0.0)
+    P = (geo.pitch_radius_driving, 0.0)
     l0 = rotate_point(base[0], Op, tau)
     l1 = rotate_point(base[1], Op, tau)
     foot = foot_of_perpendicular(P, l0, l1)
     return rotate_point(foot, Ow, tau / geo.ratio)
 
 
-def wheel_tip_points(inp: GearInputs, geo: DerivedGeometry,
-                     samples: int = 240) -> List[Point]:
-    """Dense wheel-tip locus, ordered from the flank join (y = -half_w) up to the
-    centerline apex (y = 0), on the -y (lower) side, in wheel coords. This is the
+def driving_tip_points(inp: GearInputs, geo: DerivedGeometry,
+                       samples: int = 240) -> List[Point]:
+    """Dense driving-tip locus, ordered from the flank join (y = -half_w) up to the
+    centerline apex (y = 0), on the -y (lower) side, in driving coords. This is the
     exact conjugate locus (foot-of-perpendicular envelope) before splining."""
     base = _contacting_flank(geo)
     hw = geo.half_w
-    tooth_pitch = 2.0 * math.pi / inp.pinion_teeth
+    tooth_pitch = 2.0 * math.pi / inp.driven_teeth
     # scan a WIDE tau range (the crossing tau shifts with ratio)
     N = 4000
     lo, hi = -1.5 * tooth_pitch, 1.5 * tooth_pitch
     prev_t = lo
-    prev_y = wheel_contact_point(geo, base, lo)[1]
+    prev_y = driving_contact_point(geo, base, lo)[1]
 
     def find_cross(target):
-        pt, py = lo, wheel_contact_point(geo, base, lo)[1]
+        pt, py = lo, driving_contact_point(geo, base, lo)[1]
         for i in range(1, N + 1):
             tt = lo + (hi - lo) * i / N
-            yy = wheel_contact_point(geo, base, tt)[1]
+            yy = driving_contact_point(geo, base, tt)[1]
             if (py - target) * (yy - target) <= 0 and py != yy:
                 f = (target - py) / (yy - py)
                 return pt + f * (tt - pt)
@@ -353,11 +357,11 @@ def wheel_tip_points(inp: GearInputs, geo: DerivedGeometry,
     tau_join = find_cross(-hw)
     tau_apex = find_cross(0.0)
     if tau_join is None or tau_apex is None:
-        raise ValueError("could not locate wheel-tip join/apex (check inputs)")
+        raise ValueError("could not locate driving-tip join/apex (check inputs)")
     pts = []
     for i in range(samples):
         tau = tau_join + (tau_apex - tau_join) * i / (samples - 1)
-        pts.append(wheel_contact_point(geo, base, tau))
+        pts.append(driving_contact_point(geo, base, tau))
     pts[-1] = (pts[-1][0], 0.0)            # snap apex onto the centerline
     return pts
 
@@ -370,22 +374,22 @@ class Segment:
     degree: int = 0                      # for 'cpspline': Bezier degree (3 or 5)
 
 
-def _pinion_cap_apex_x(geo: DerivedGeometry) -> float:
-    return math.sqrt(geo.pitch_radius_pinion ** 2 - geo.half_w ** 2) + geo.half_w
+def _driven_cap_apex_x(geo: DerivedGeometry) -> float:
+    return math.sqrt(geo.pitch_radius_driven ** 2 - geo.half_w ** 2) + geo.half_w
 
 
-def build_wheel_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
-    """One wheel tooth centered on the +x axis, as a connected counter-clockwise
+def build_driving_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
+    """One driving tooth centered on the +x axis, as a connected counter-clockwise
     list of Segments: lower flank (line) -> lower tip (cpspline) -> upper tip
     (cpspline) -> upper flank (line). The tip is the conjugate envelope fitted as a
     single clamped Bezier per half (a control-point spline -- no tangent-handle DOF,
     so it can be fully constrained and rotated in the sketch). `resolution` selects
     the degree (<=4 -> 3, else 5); `tangent_join` makes the tip leave the flank join
     horizontally. The apex is a sharp point (printer smooths it)."""
-    rw = geo.pitch_radius_wheel
+    rw = geo.pitch_radius_driving
     hw = geo.half_w
 
-    locus = wheel_tip_points(inp, geo)               # join(y=-hw) -> apex(y=0)
+    locus = driving_tip_points(inp, geo)               # join(y=-hw) -> apex(y=0)
     # snap the endpoints exactly onto the flank level and the centerline (the
     # tau-crossing scan lands within ~1e-7 of them)
     locus[0] = (locus[0][0], -hw)
@@ -397,12 +401,12 @@ def build_wheel_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
     degree = 3 if inp.resolution <= 4 else 5
     lower = fit_tip_bezier(locus, degree, inp.tangent_join)   # control points
     upper = [(x, -y) for (x, y) in reversed(lower)]  # apex -> join(y=+hw)
-    wheel_tip_h = apex_x - rw
-    # root clears the MATING tooth's tip (pinion cap) + clearance
-    pinion_tip_h = _pinion_cap_apex_x(geo) - geo.pitch_radius_pinion
-    root_radius = rw - (pinion_tip_h + inp.clearance_mm) * inp.dedendum_factor
+    driving_tip_h = apex_x - rw
+    # root clears the MATING tooth's tip (driven cap) + clearance
+    driven_tip_h = _driven_cap_apex_x(geo) - geo.pitch_radius_driven
+    root_radius = rw - (driven_tip_h + inp.clearance_mm) * inp.dedendum_factor
     if root_radius <= hw:
-        raise ValueError("computed wheel root radius is too small; teeth too large")
+        raise ValueError("computed driving root radius is too small; teeth too large")
     foot_x = math.sqrt(root_radius ** 2 - hw ** 2)
 
     segs: List[Segment] = []
@@ -413,22 +417,22 @@ def build_wheel_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
     return segs
 
 
-def build_pinion_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
-    """One pinion tooth centered on the +x axis: two parallel straight flanks a
-    feature-width apart ending ON the pinion pitch circle, capped by a semicircular
+def build_driven_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
+    """One driven tooth centered on the +x axis: two parallel straight flanks a
+    feature-width apart ending ON the driven pitch circle, capped by a semicircular
     tip (radius half_w, centered just inside the pitch circle). The tip is free
-    (never contacts the wheel); only the flanks are working surfaces."""
-    rp = geo.pitch_radius_pinion
+    (never contacts the driving gear); only the flanks are working surfaces."""
+    rp = geo.pitch_radius_driven
     hw = geo.half_w
     flank_top_x = math.sqrt(rp ** 2 - hw ** 2)       # flank ends on the pitch circle
     cap_apex_x = flank_top_x + hw
 
-    # root clears the MATING tooth's tip (wheel apex) + clearance
-    wheel_apex_x = wheel_tip_points(inp, geo)[-1][0]
-    wheel_tip_h = wheel_apex_x - geo.pitch_radius_wheel
-    root_radius = rp - (wheel_tip_h + inp.clearance_mm) * inp.dedendum_factor
+    # root clears the MATING tooth's tip (driving apex) + clearance
+    driving_apex_x = driving_tip_points(inp, geo)[-1][0]
+    driving_tip_h = driving_apex_x - geo.pitch_radius_driving
+    root_radius = rp - (driving_tip_h + inp.clearance_mm) * inp.dedendum_factor
     if root_radius <= hw:
-        raise ValueError("computed pinion root radius is too small; teeth too large")
+        raise ValueError("computed driven root radius is too small; teeth too large")
     foot_x = math.sqrt(root_radius ** 2 - hw ** 2)
 
     segs: List[Segment] = []
@@ -489,8 +493,8 @@ class GearProfile:
 
 @dataclass
 class GearPair:
-    wheel: GearProfile
-    pinion: GearProfile
+    driving: GearProfile
+    driven: GearProfile
     center_distance: float
     circular_pitch: float
 
@@ -504,27 +508,27 @@ def build_gear_pair(inp: GearInputs) -> GearPair:
     validate_inputs(inp)
     geo = derive_geometry(inp)
 
-    wheel_tooth = build_wheel_tooth(inp, geo)
-    pinion_tooth = build_pinion_tooth(inp, geo)
+    driving_tooth = build_driving_tooth(inp, geo)
+    driven_tooth = build_driven_tooth(inp, geo)
 
-    wheel_segs = close_gear_loop(wheel_tooth, inp.wheel_teeth, base_angle=0.0)
-    # Pinion tooth points toward the wheel (-x), offset half a pitch so a pinion
-    # tooth-GAP faces each wheel tooth.
-    pinion_half_pitch = math.pi / inp.pinion_teeth
-    pinion_segs = close_gear_loop(pinion_tooth, inp.pinion_teeth,
-                                  base_angle=math.pi + pinion_half_pitch)
+    driving_segs = close_gear_loop(driving_tooth, inp.driving_teeth, base_angle=0.0)
+    # Driven tooth points toward the driving gear (-x), offset half a pitch so a driven
+    # tooth-GAP faces each driving tooth.
+    driven_half_pitch = math.pi / inp.driven_teeth
+    driven_segs = close_gear_loop(driven_tooth, inp.driven_teeth,
+                                  base_angle=math.pi + driven_half_pitch)
 
-    w_root, w_add = _radii(wheel_segs)
-    p_root, p_add = _radii(pinion_segs)
+    drv_root, drv_add = _radii(driving_segs)
+    drvn_root, drvn_add = _radii(driven_segs)
 
-    wheel = GearProfile('wheel', inp.wheel_teeth, (0.0, 0.0),
-                        geo.pitch_radius_wheel, w_root, w_add, wheel_segs,
-                        tooth_segments=wheel_tooth, base_angle=0.0)
-    pinion = GearProfile('pinion', inp.pinion_teeth, (geo.center_distance, 0.0),
-                         geo.pitch_radius_pinion, p_root, p_add, pinion_segs,
-                         tooth_segments=pinion_tooth,
-                         base_angle=math.pi + pinion_half_pitch)
-    return GearPair(wheel, pinion, geo.center_distance, geo.circular_pitch)
+    driving = GearProfile('driving', inp.driving_teeth, (0.0, 0.0),
+                          geo.pitch_radius_driving, drv_root, drv_add, driving_segs,
+                          tooth_segments=driving_tooth, base_angle=0.0)
+    driven = GearProfile('driven', inp.driven_teeth, (geo.center_distance, 0.0),
+                         geo.pitch_radius_driven, drvn_root, drvn_add, driven_segs,
+                         tooth_segments=driven_tooth,
+                         base_angle=math.pi + driven_half_pitch)
+    return GearPair(driving, driven, geo.center_distance, geo.circular_pitch)
 
 
 # ============================================ densify (for interference/testing)

@@ -15,10 +15,10 @@ def test_from_json_handles_garbage():
 
 
 def test_from_json_fills_missing_keys():
-    partial = '{"wheel_teeth": 40}'
+    partial = '{"driving_teeth": 40}'
     out = settings.from_json(partial)
-    assert out["wheel_teeth"] == 40
-    assert out["pinion_teeth"] == settings.defaults()["pinion_teeth"]
+    assert out["driving_teeth"] == 40
+    assert out["driven_teeth"] == settings.defaults()["driven_teeth"]
 
 
 def test_defaults_use_tooth_fraction_not_feature_width():

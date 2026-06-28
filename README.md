@@ -1,12 +1,12 @@
 # Perfect Print Gears — Fusion 360 Add-in
 
 A Fusion 360 add-in that generates **Perfect Print gears** as solid bodies: a
-matched **wheel + pinion** pair built into a component you select.
+matched **driving + driven gear** pair built into a component you select.
 
 Perfect Print gears are a 3D-print-optimized gear profile. Instead of an involute
 or a classic cycloid, both gears have **constant-width teeth** — each working flank
-is a straight line parallel to a gear radial — and the wheel's tip is the exact
-**conjugate** of the pinion's straight flank. The result meshes with
+is a straight line parallel to a gear radial — and the **driving** gear's tip is the
+exact **conjugate** of the **driven** gear's straight flank. The result meshes with
 constant velocity, low friction, and prints cleanly without fine involute detail.
 
 > ### Credit
@@ -20,19 +20,23 @@ constant velocity, low friction, and prints cleanly without fine involute detail
 
 ## What it does
 
-- Generates a **wheel** and a matching **pinion** as **solid bodies** — each tooth is
-  extruded and circular-patterned from a parametric sketch (the wheel fully
-  constrained; the pinion left with one alignment DOF, see below).
-- Builds them in **meshing layout**: wheel at the origin, pinion at the center
+- Generates a **driving** and a matching **driven** gear as **solid bodies** — each tooth is
+  extruded and circular-patterned from a parametric sketch (the driving gear fully
+  constrained; the driven gear left with one alignment DOF, see below).
+- Builds them in **meshing layout**: driving gear at the origin, driven gear at the center
   distance, pitch circles tangent.
-- Leaves the **pinion free to swing** around the wheel (its pitch stays tangent, so
+- Leaves the **driven gear free to swing** around the driving gear (its pitch stays tangent, so
   the center distance is fixed) so you can **align it with existing features** — add
   your own constraint (coincident to an axle point, an angle dimension, collinear to
   an edge) to lock it where you want. A target at the wrong spacing simply won't solve.
+- Supports **reductions** (driving < driven, output slower), **step-ups** (driving > driven),
+  and **1:1** — any tooth counts ≥ 6 on both, including clock motion-work style reductions.
+  Very low driving-gear tooth counts mesh more tightly; use `tooth_fraction` ≈ 0.40–0.45 for
+  extra backlash in those cases.
 - Persists your last-used settings on the document and pre-fills them next run.
 
-Because the wheel tip is conjugate to one specific pinion, **every wheel/pinion
-combination is unique** and must be generated together for its mating partner.
+Because the driving gear tip is conjugate to one specific driven gear, **every driving/driven
+pair is unique** and must be generated together for its mating partner.
 
 ---
 
@@ -52,18 +56,18 @@ Open **Solid → Create → Generate Perfect Print Gears** and set:
 
 | Input | Meaning |
 |---|---|
-| **Wheel component** | Component to build the wheel into (defaults to the active component). |
-| **Pinion component** | Component to build the pinion into (defaults to the **same as the wheel**). Select different components to split the pair across components — the pinion still meshes to the wheel across components. To put both in one specific component, set it here as the wheel and leave this empty (Fusion won't allow the same component in both pickers). |
+| **Driving gear component** | Component to build the driving gear into (defaults to the active component). |
+| **Driven gear component** | Component to build the driven gear into (defaults to the **same as the driving gear**). Select different components to split the pair across components — the driven gear still meshes to the driving gear across components. To put both in one specific component, set it here as the driving gear and leave this empty (Fusion won't allow the same component in both pickers). |
 | **Sketch plane** *(optional)* | Construction plane or planar face the gear sketches are drawn on (defaults to the root XY plane). Shared by both gears so they stay coplanar and mesh. A picked face is used via a coincident construction plane, so even a small axle-top face works. |
-| **Wheel center** *(optional)* | Point (sketch point, construction point, or vertex) to place the wheel center on (defaults to the sketch origin). The pinion meshes relative to the wheel. |
-| **Wheel teeth / Pinion teeth** | Tooth counts (pinion ≥ 6, wheel ≥ pinion). |
+| **Driving gear center** *(optional)* | Point (sketch point, construction point, or vertex) to place the driving gear center on (defaults to the sketch origin). The driven gear meshes relative to the driving gear. |
+| **Driving / Driven gear teeth** | Tooth counts, each ≥ 6. The driving gear carries the conjugate tip; either may be larger, so the pair can be a **reduction** (driving < driven), **step-up** (driving > driven), or **1:1**. |
 | **Gear ratio** *(read-only)* | Displays the resulting ratio as a decimal and reduced integer form, e.g. `3.33 : 1 (10 : 3)`. Updates live as tooth counts change. |
 | **Tooth sizing → Module (mm)** | Sets the tooth size / pitch. `circular pitch = π · module`. Mutually linked with tooth width (editing one updates the other). |
 | **Tooth sizing → Tooth width (mm)** | The physical tooth width — **editable and mutually linked with module**. Editing it back-solves the module at the current tooth fraction (`module = tooth_width / (tooth_fraction · π)`); editing module or tooth fraction recomputes it (`tooth_width = tooth_fraction · π · module`). Lets you dial in a specific width for 3D printing. |
 | **Tooth sizing → Tooth fraction** | Tooth width as a fraction of the circular pitch (0–0.5). **This is the backlash knob:** 0.5 = equal tooth and space; below 0.5 thins the teeth for circumferential play. Editing it recomputes tooth width (module pinned). |
 | **Clearance** | Radial tip-to-root play (absolute mm or % of tooth width). Independent of tooth fraction. |
 | **Advanced → Dedendum factor** | Optional root-depth scaling. |
-| **Advanced → Tip control points** | Control points per wheel-tip half: **4** (degree-3 Bézier, default) or **5–6** (degree-5). The tip is a control-point spline, so it is fully constrained and the wheel can be rotated by editing its orientation dimension. |
+| **Advanced → Tip control points** | Control points per driving-gear tip half: **4** (degree-3 Bézier, default) or **5–6** (degree-5). The tip is a control-point spline, so it is fully constrained and the driving gear can be rotated by editing its orientation dimension. |
 | **Advanced → Tangent tip join** | Make the tip leave the flank join **tangent** (smoother) instead of the faithful conjugate corner. Fits the envelope less well — a warning recommends 5+ control points when this is enabled. |
 
 Click **OK** to draw the pair. Invalid combinations disable OK and show an inline
@@ -77,15 +81,15 @@ message.
 
 ## How the geometry works
 
-The wheel tip is generated as the **conjugate** of the straight pinion flank, using
-one consistent kinematic model (the pinion rotates `+τ` about its center while the
-wheel rotates `−τ/ratio` about its). For a straight flank the contact point is the
+The driving gear tip is generated as the **conjugate** of the straight driven gear flank, using
+one consistent kinematic model (the driven gear rotates `+τ` about its center while the
+driving gear rotates `−τ/ratio` about its). For a straight flank the contact point is the
 **foot of the perpendicular from the pitch point onto the flank**; sweeping `τ`
 traces the tip locus. It is trimmed from the flank join up to the centerline apex,
 mirrored, and represented as a **control-point (Bézier) spline** — a degree-3
 (4 control points) or degree-5 (6) curve fitted to the envelope (~3 µm at degree 3).
 A control-point spline has no tangent handles, so its control points can be fully
-constrained — which is what lets the wheel sketch be **rotated** by editing an angle
+constrained — which is what lets the driving gear sketch be **rotated** by editing an angle
 dimension. By default the join to the flank is **not** tangent — there is a real
 ~12° corner; forcing tangency (the optional *Tangent tip join*) deviates from the
 true envelope more, so the faithful non-tangent shape is the default. The apex is a
@@ -123,7 +127,7 @@ cannot be driven headless; it is verified by loading the add-in in Fusion.
 ## Scope
 
 Solid gear bodies (extrude + circular pattern) — no fillets, bores, or motion
-links; one wheel + pinion mesh per run (the pair can be split across two
+links; one driving + driven gear mesh per run (the pair can be split across two
 components or built into one); spur gears only (non-helical/bevel/internal).
 
 ## License & attribution
