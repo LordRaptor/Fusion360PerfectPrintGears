@@ -2,6 +2,32 @@
 
 <!-- version list -->
 
+## v1.6.1 (2026-06-28)
+
+### Bug Fixes
+
+- Cut maintenance release for public launch
+  ([`bf25fd2`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/bf25fd2bd7532ab9f8484bd55cd9ddd69b65c8dd))
+
+### Chores
+
+- Stop tracking .idea, add NOTICE for Autodesk template
+  ([`08e4902`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/08e4902ba3b62d914249a7920d1a26bc26c3158f))
+
+- Stop tracking docs folder
+  ([`e430e7b`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/e430e7bbeb5db78b00419c9e65a0f8f0659beb6a))
+
+### Continuous Integration
+
+- Release job pushes with RELEASE_TOKEN to satisfy ruleset
+  ([`8c71529`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/8c71529eb756d6b1d7327cd199d28f7eb058a7f3))
+
+### Documentation
+
+- Drop docs/ reference, refresh scope, add Apache-2.0 footer
+  ([`58cbc5e`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/58cbc5e09057dc48a3115d25a57e94d0f501ceb3))
+
+
 ## v1.6.0 (2026-06-27)
 
 ### Bug Fixes
