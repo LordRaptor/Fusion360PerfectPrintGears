@@ -2,6 +2,41 @@
 
 <!-- version list -->
 
+## v1.7.0 (2026-06-28)
+
+### Documentation
+
+- Align CLAUDE.md with driving/driven terminology
+  ([`bc01518`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/bc01518c222a8f4e5d104faa950e8cfc3e782004))
+
+- Driving/driven terminology and reduction support
+  ([`2e601d2`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/2e601d2b063b7516646a9ba39f3c5c0e24696d54))
+
+### Features
+
+- **engine**: Allow reductions and 1:1; min teeth on both gears
+  ([`fa4e41a`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/fa4e41a689d14e8834426e5212c1729034484436))
+
+- **engine**: Direction-aware ratio readout (step-up/reduction/1:1)
+  ([`8e8d171`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/8e8d1715ba3f2c5f571144bcd4bf85d12434bf44))
+
+- **fusion**: Name the face-derived helper plane with both tooth counts
+  ([`ea323a6`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/ea323a63eb30d3fb6f0fc7665d4692e95ab0f498))
+
+### Refactoring
+
+- **engine**: Rename wheel/pinion -> driving/driven
+  ([`d69d4bc`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/d69d4bc62c77151c55ec41b577e3fe259a98fa65))
+
+- **fusion**: Rename wheel/pinion -> driving/driven in UI and builder
+  ([`1a0f30f`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/1a0f30fccb72aa27b5af7c8d91e3dfef64e8802d))
+
+### Testing
+
+- **engine**: Guard interference for reductions and 1:1
+  ([`b031c46`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/b031c461e3c51974a63e340261314c79f6cb055e))
+
+
 ## v1.6.1 (2026-06-28)
 
 ### Bug Fixes
