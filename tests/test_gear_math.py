@@ -366,13 +366,17 @@ def test_gear_outlines_form_single_closed_loop():
 
 
 # ------------------------------------------------------------------ ratio format
-def test_format_ratio_integer_reduction():
-    assert gm.format_ratio(60, 12) == "5.00 : 1 (5 : 1)"
+def test_format_ratio_step_up():
+    assert gm.format_ratio(60, 12) == "5 : 1 (step-up)"
 
 
-def test_format_ratio_non_integer():
-    assert gm.format_ratio(50, 15) == "3.33 : 1 (10 : 3)"
+def test_format_ratio_reduction():
+    assert gm.format_ratio(10, 40) == "1 : 4 (reduction)"
 
 
-def test_format_ratio_equal_counts():
-    assert gm.format_ratio(20, 20) == "1.00 : 1 (1 : 1)"
+def test_format_ratio_non_integer_reduces():
+    assert gm.format_ratio(50, 15) == "10 : 3 (step-up)"
+
+
+def test_format_ratio_equal_counts_is_one_to_one():
+    assert gm.format_ratio(20, 20) == "1 : 1"

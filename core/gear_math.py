@@ -102,12 +102,15 @@ def validate_inputs(inp: GearInputs) -> None:
 
 
 def format_ratio(wheel_teeth: int, pinion_teeth: int) -> str:
-    """Human-readable reduction ratio: decimal to 2 dp plus the GCD-reduced
-    integer pair, e.g. format_ratio(50, 15) == "3.33 : 1 (10 : 3)"."""
-    decimal = wheel_teeth / pinion_teeth
+    """Human-readable tooth ratio with direction. The GCD-reduced pair a:b of
+    driving:driven, plus a word -- driving > driven is a step-up, driving < driven a
+    reduction, equal is 1:1 (e.g. format_ratio(10, 40) == "1 : 4 (reduction)")."""
     g = math.gcd(int(wheel_teeth), int(pinion_teeth))
-    rw, rp = int(wheel_teeth) // g, int(pinion_teeth) // g
-    return f"{decimal:.2f} : 1 ({rw} : {rp})"
+    a, b = int(wheel_teeth) // g, int(pinion_teeth) // g
+    if wheel_teeth == pinion_teeth:
+        return f"{a} : {b}"                      # "1 : 1"
+    word = "step-up" if wheel_teeth > pinion_teeth else "reduction"
+    return f"{a} : {b} ({word})"
 
 
 # ===================================================================== 2D math
