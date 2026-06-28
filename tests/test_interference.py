@@ -2,7 +2,7 @@
 """Conjugacy / interference guard -- the test that was missing before (sanity
 checks alone let a non-conjugate curve ship). Assemble both gears as CLOSED
 polygons, roll them under the SAME kinematic model used to generate the tip
-(pinion +tau, wheel -tau/ratio), and assert penetration DEPTH stays tiny.
+(driven +tau, driving -tau/ratio), and assert penetration DEPTH stays tiny.
 
 Hygiene (each item caused a false result historically): closed polygons with
 root bridges; build local then a single placement transform; penetration depth
@@ -49,14 +49,14 @@ def _dist_to_poly(px, py, poly):
 
 def _max_penetration(inp):
     geo = gm.derive_geometry(inp)
-    rw, rp = geo.pitch_radius_wheel, geo.pitch_radius_pinion
+    rw, rp = geo.pitch_radius_driving, geo.pitch_radius_driven
     C, ratio, m = geo.center_distance, geo.ratio, inp.module_mm
-    base = math.pi + math.pi / inp.pinion_teeth
+    base = math.pi + math.pi / inp.driven_teeth
 
-    wheel_local = gm.closed_gear_polygon(gm.build_wheel_tooth(inp, geo),
-                                         inp.wheel_teeth, 0.0, n_spline=18, n_arc=8)
-    pinion_local = gm.closed_gear_polygon(gm.build_pinion_tooth(inp, geo),
-                                          inp.pinion_teeth, base, n_spline=18, n_arc=8)
+    driving_local = gm.closed_gear_polygon(gm.build_driving_tooth(inp, geo),
+                                           inp.driving_teeth, 0.0, n_spline=18, n_arc=8)
+    driven_local = gm.closed_gear_polygon(gm.build_driven_tooth(inp, geo),
+                                          inp.driven_teeth, base, n_spline=18, n_arc=8)
 
     # mesh zone derived from geometry (centered on the pitch point), NOT hard-coded
     zx0, zx1, zy = rw - 4 * m, rw + 4 * m, 4 * m
@@ -65,8 +65,8 @@ def _max_penetration(inp):
         return zx0 < p[0] < zx1 and -zy < p[1] < zy
 
     def penetration(tau):
-        w = _place(wheel_local, -tau / ratio, 0.0, 0.0)
-        p = _place(pinion_local, tau, C, 0.0)
+        w = _place(driving_local, -tau / ratio, 0.0, 0.0)
+        p = _place(driven_local, tau, C, 0.0)
         depth = 0.0
         for q in w:
             if in_zone(q) and _point_in_poly(q[0], q[1], p):
@@ -76,7 +76,7 @@ def _max_penetration(inp):
                 depth = max(depth, _dist_to_poly(q[0], q[1], w))
         return depth
 
-    tp = 2.0 * math.pi / inp.pinion_teeth
+    tp = 2.0 * math.pi / inp.driven_teeth
     n = 41
     return max(penetration(-tp + 2.0 * tp * i / (n - 1)) for i in range(n))
 
@@ -89,7 +89,7 @@ def _max_penetration(inp):
 def test_no_interference_with_backlash(nw, np_):
     # Realistic tooth fraction (< 0.5) gives circumferential backlash; the driving
     # flanks never overlap -> ~0 penetration across the whole mesh cycle.
-    inp = gm.GearInputs(wheel_teeth=nw, pinion_teeth=np_, module_mm=1.5,
+    inp = gm.GearInputs(driving_teeth=nw, driven_teeth=np_, module_mm=1.5,
                         tooth_fraction=0.4, clearance_mm=0.1, resolution=8)
     depth_um = _max_penetration(inp) * 1000.0
     assert depth_um < 60.0, f"penetration {depth_um:.1f} um too high (ratio {nw}/{np_})"
@@ -99,7 +99,7 @@ def test_zone_actually_captures_contact():
     # Guard against a false zero: at the snug fraction (0.5) the driving flanks
     # touch, so the mesh zone MUST report a (small, spline-noise) nonzero depth.
     # If this is ~0 too, the zone is missing the contact (the old false-0 bug).
-    inp = gm.GearInputs(wheel_teeth=50, pinion_teeth=10, module_mm=1.5,
+    inp = gm.GearInputs(driving_teeth=50, driven_teeth=10, module_mm=1.5,
                         tooth_fraction=0.5, clearance_mm=0.1, resolution=8)
     depth_um = _max_penetration(inp) * 1000.0
     assert depth_um > 1.0, "mesh zone captured no contact (false-zero) -- check the zone"
@@ -108,7 +108,7 @@ def test_zone_actually_captures_contact():
 def test_zone_captures_contact_reduction():
     # Same false-zero guard as above, but for a reduction (driving < driven): at the
     # snug fraction the driving flanks touch, so the zone MUST report nonzero depth.
-    inp = gm.GearInputs(wheel_teeth=10, pinion_teeth=40, module_mm=1.5,
+    inp = gm.GearInputs(driving_teeth=10, driven_teeth=40, module_mm=1.5,
                         tooth_fraction=0.5, clearance_mm=0.1, resolution=8)
     depth_um = _max_penetration(inp) * 1000.0
     assert depth_um > 1.0, "mesh zone captured no contact for a reduction (false-zero)"
