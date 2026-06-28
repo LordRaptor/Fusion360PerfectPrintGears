@@ -75,20 +75,20 @@ def module_from_tooth_width(width_mm: float, tooth_fraction: float) -> float:
     return width_mm / (tooth_fraction * math.pi)
 
 
-MIN_PINION_TEETH = 6
+MIN_TEETH = 6
 
 
 def validate_inputs(inp: GearInputs) -> None:
-    """Raise ValueError with a human-readable message if inputs are unusable."""
-    if inp.pinion_teeth < MIN_PINION_TEETH:
-        raise ValueError(f"pinion teeth must be at least {MIN_PINION_TEETH}")
-    if inp.wheel_teeth < inp.pinion_teeth:
-        raise ValueError("wheel teeth must be >= pinion teeth")
+    """Raise ValueError with a human-readable message if inputs are unusable.
+
+    Either gear may be the larger one: the DRIVING gear carries the conjugate tip and
+    the DRIVEN gear the straight flanks, regardless of size, so reductions (driving <
+    driven) and 1:1 are valid -- only a per-gear minimum tooth count and the
+    tooth-width-fits-the-smaller-gear bound apply."""
+    if inp.wheel_teeth < MIN_TEETH or inp.pinion_teeth < MIN_TEETH:
+        raise ValueError(f"both gears must have at least {MIN_TEETH} teeth")
     if inp.module_mm <= 0:
         raise ValueError("module must be greater than 0")
-    # Feature width is DERIVED from the tooth fraction, so the old "teeth overlap"
-    # case is structurally impossible; instead bound the fraction. At 0.5 the teeth
-    # exactly fill the pitch (clearance provides the gap); above 0.5 there is no gap.
     if not (0.0 < inp.tooth_fraction <= 0.5):
         raise ValueError("tooth fraction must be between 0 and 0.5")
     geo = derive_geometry(inp)
@@ -96,8 +96,9 @@ def validate_inputs(inp: GearInputs) -> None:
         raise ValueError("clearance must be >= 0")
     if inp.clearance_mm >= geo.feature_width_mm:
         raise ValueError("clearance must be less than the feature width")
-    if geo.half_w >= geo.pitch_radius_pinion:
-        raise ValueError("feature width is too large for the pinion size")
+    smaller_pitch_radius = min(geo.pitch_radius_wheel, geo.pitch_radius_pinion)
+    if geo.half_w >= smaller_pitch_radius:
+        raise ValueError("feature width is too large for the smaller gear")
 
 
 def format_ratio(wheel_teeth: int, pinion_teeth: int) -> str:

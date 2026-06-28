@@ -57,14 +57,17 @@ def test_validate_accepts_good_inputs():
     gm.validate_inputs(_valid_inputs(tooth_fraction=0.4))
 
 
-def test_validate_rejects_low_pinion_teeth():
-    with pytest.raises(ValueError, match="pinion teeth"):
+def test_validate_rejects_low_teeth_on_either_gear():
+    with pytest.raises(ValueError, match="at least 6"):
         gm.validate_inputs(_valid_inputs(pinion_teeth=5))
+    with pytest.raises(ValueError, match="at least 6"):
+        gm.validate_inputs(_valid_inputs(wheel_teeth=5))
 
 
-def test_validate_rejects_wheel_smaller_than_pinion():
-    with pytest.raises(ValueError, match="wheel teeth"):
-        gm.validate_inputs(_valid_inputs(wheel_teeth=8, pinion_teeth=10))
+def test_validate_accepts_reduction_driving_smaller_than_driven():
+    # The whole point: driving (wheel/tip gear) may now be smaller than driven.
+    gm.validate_inputs(_valid_inputs(wheel_teeth=10, pinion_teeth=40))
+    gm.validate_inputs(_valid_inputs(wheel_teeth=20, pinion_teeth=20))  # 1:1
 
 
 def test_validate_rejects_nonpositive_module():
