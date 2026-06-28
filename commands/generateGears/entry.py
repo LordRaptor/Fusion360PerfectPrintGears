@@ -12,7 +12,7 @@ ui = app.userInterface
 
 CMD_ID = f'{config.COMPANY_NAME}_{config.ADDIN_NAME}_generateGears'
 CMD_NAME = 'Generate Perfect Print Gears'
-CMD_DESC = 'Generate a matched Perfect Print wheel + pinion as sketches'
+CMD_DESC = 'Generate a matched Perfect Print driving + driven gear as sketches'
 IS_PROMOTED = False
 WORKSPACE_ID = 'FusionSolidEnvironment'
 PANEL_ID = 'SolidCreatePanel'
@@ -72,17 +72,17 @@ def _build_inputs(inputs):
             s = settings.from_json(attr.value)
     futil.log(f'build: settings = {s}')
 
-    futil.log('build: wheelComponent')
-    wsel = inputs.addSelectionInput('wheelComponent', 'Wheel component',
-                                    'Component to draw the wheel into (default: active)')
+    futil.log('build: drivingComponent')
+    wsel = inputs.addSelectionInput('drivingComponent', 'Driving gear',
+                                    'Component to draw the driving gear into (default: active)')
     wsel.addSelectionFilter('Occurrences')
     wsel.addSelectionFilter('RootComponents')
     wsel.setSelectionLimits(0, 1)
 
-    futil.log('build: pinionComponent')
-    psel = inputs.addSelectionInput('pinionComponent', 'Pinion component',
-                                    'Component to draw the pinion into '
-                                    '(default: same as the wheel)')
+    futil.log('build: drivenComponent')
+    psel = inputs.addSelectionInput('drivenComponent', 'Driven gear',
+                                    'Component to draw the driven gear into '
+                                    '(default: same as the driving gear)')
     psel.addSelectionFilter('Occurrences')
     psel.addSelectionFilter('RootComponents')
     psel.setSelectionLimits(0, 1)
@@ -90,14 +90,14 @@ def _build_inputs(inputs):
     futil.log('build: sketchPlane')
     plane_sel = inputs.addSelectionInput('sketchPlane', 'Sketch plane',
                                          'Plane or planar face to build the gear sketches on '
-                                         '(default: the wheel component XY plane)')
+                                         '(default: the driving gear component XY plane)')
     plane_sel.addSelectionFilter('ConstructionPlanes')
     plane_sel.addSelectionFilter('PlanarFaces')
     plane_sel.setSelectionLimits(0, 1)
 
-    futil.log('build: wheelCenter')
-    ctr_sel = inputs.addSelectionInput('wheelCenter', 'Wheel center',
-                                       'Point to place the wheel center on '
+    futil.log('build: drivingCenter')
+    ctr_sel = inputs.addSelectionInput('drivingCenter', 'Driving gear center',
+                                       'Point to place the driving gear center on '
                                        '(default: the sketch origin)')
     ctr_sel.addSelectionFilter('SketchPoints')
     ctr_sel.addSelectionFilter('ConstructionPoints')
@@ -105,8 +105,8 @@ def _build_inputs(inputs):
     ctr_sel.setSelectionLimits(0, 1)
 
     futil.log('build: teeth')
-    inputs.addIntegerSpinnerCommandInput('wheelTeeth', 'Wheel teeth', 6, 2000, 1, int(s['wheel_teeth']))
-    inputs.addIntegerSpinnerCommandInput('pinionTeeth', 'Pinion teeth', 6, 2000, 1, int(s['pinion_teeth']))
+    inputs.addIntegerSpinnerCommandInput('drivingTeeth', 'Driving gear teeth', 6, 2000, 1, int(s['driving_teeth']))
+    inputs.addIntegerSpinnerCommandInput('drivenTeeth', 'Driven gear teeth', 6, 2000, 1, int(s['driven_teeth']))
 
     futil.log('build: ratioInfo')
     # Read-only readout of the reduction ratio implied by the tooth counts.
@@ -188,8 +188,8 @@ def _relink_tooth_sizing(inputs, changed_id):
 def _update_ratio_display(inputs):
     """Recompute the reduction-ratio readout from the current tooth counts."""
     try:
-        wt = inputs.itemById('wheelTeeth').value
-        pt = inputs.itemById('pinionTeeth').value
+        wt = inputs.itemById('drivingTeeth').value
+        pt = inputs.itemById('drivenTeeth').value
         inputs.itemById('ratioInfo').text = gear_math.format_ratio(wt, pt)
     except Exception:
         pass
@@ -210,7 +210,7 @@ def command_input_changed(args: adsk.core.InputChangedEventArgs):
             _relink_tooth_sizing(inputs, changed.id)
         finally:
             _linking = False
-    elif changed.id in ('wheelTeeth', 'pinionTeeth'):
+    elif changed.id in ('drivingTeeth', 'drivenTeeth'):
         _update_ratio_display(inputs)
     elif changed.id == 'clearanceMode':
         is_pct = inputs.itemById('clearanceMode').selectedItem.name == 'Percent'
@@ -235,8 +235,8 @@ def _read_inputs(inputs):
 
     adv = inputs.itemById('advanced').children
     return gear_math.GearInputs(
-        wheel_teeth=inputs.itemById('wheelTeeth').value,
-        pinion_teeth=inputs.itemById('pinionTeeth').value,
+        driving_teeth=inputs.itemById('drivingTeeth').value,
+        driven_teeth=inputs.itemById('drivenTeeth').value,
         module_mm=module_mm,
         tooth_fraction=tooth_fraction,
         clearance_mm=clearance_mm,
@@ -291,9 +291,9 @@ def _resolve_plane(inputs):
     return None
 
 
-def _resolve_wheel_center(inputs):
-    """The selected wheel-center point entity, or None to use the sketch origin."""
-    sel = inputs.itemById('wheelCenter')
+def _resolve_driving_center(inputs):
+    """The selected driving-gear center point entity, or None to use the sketch origin."""
+    sel = inputs.itemById('drivingCenter')
     if sel.selectionCount == 1:
         return sel.selection(0).entity
     return None
@@ -303,8 +303,8 @@ def _persist_settings(inputs):
     design = adsk.fusion.Design.cast(app.activeProduct)
     s = settings.defaults()
     s.update({
-        'wheel_teeth': inputs.itemById('wheelTeeth').value,
-        'pinion_teeth': inputs.itemById('pinionTeeth').value,
+        'driving_teeth': inputs.itemById('drivingTeeth').value,
+        'driven_teeth': inputs.itemById('drivenTeeth').value,
         'module_mm': _tooth_inputs(inputs).itemById('module').value / 0.1,
         'tooth_fraction': _tooth_inputs(inputs).itemById('toothFraction').value,
         'clearance_is_percent': inputs.itemById('clearanceMode').selectedItem.name == 'Percent',
@@ -327,21 +327,21 @@ def command_execute(args: adsk.core.CommandEventArgs):
     try:
         gi = _read_inputs(inputs)
         pair = gear_math.build_gear_pair(gi)
-        wheel_comp, wheel_occ = _resolve_occurrence(inputs, 'wheelComponent')
-        # An unselected pinion component defaults to the wheel's: Fusion won't let the
-        # same entity be picked in two selection inputs, so this is how you put both
-        # gears in one specific component (select it for the wheel, leave pinion empty).
-        if inputs.itemById('pinionComponent').selectionCount == 1:
-            pinion_comp, pinion_occ = _resolve_occurrence(inputs, 'pinionComponent')
+        driving_comp, driving_occ = _resolve_occurrence(inputs, 'drivingComponent')
+        # An unselected driven component defaults to the driving gear's: Fusion won't
+        # let the same entity be picked in two selection inputs, so this is how you put
+        # both gears in one specific component (select it for driving, leave driven empty).
+        if inputs.itemById('drivenComponent').selectionCount == 1:
+            driven_comp, driven_occ = _resolve_occurrence(inputs, 'drivenComponent')
         else:
-            pinion_comp, pinion_occ = wheel_comp, wheel_occ
+            driven_comp, driven_occ = driving_comp, driving_occ
         plane = _resolve_plane(inputs)
-        wheel_center = _resolve_wheel_center(inputs)
+        driving_center = _resolve_driving_center(inputs)
         thickness_mm = inputs.itemById('thickness').value / 0.1
-        sketch_builder.build_pair(wheel_comp, wheel_occ, pinion_comp, pinion_occ,
-                                  pair, thickness_mm, plane, wheel_center)
+        sketch_builder.build_pair(driving_comp, driving_occ, driven_comp, driven_occ,
+                                  pair, thickness_mm, plane, driving_center)
         _persist_settings(inputs)
-        futil.log(f'{CMD_NAME}: generated {pair.wheel.teeth}T / {pair.pinion.teeth}T')
+        futil.log(f'{CMD_NAME}: generated {pair.driving.teeth}T / {pair.driven.teeth}T')
     except Exception:
         futil.handle_error('command_execute', show_message_box=True)
 
