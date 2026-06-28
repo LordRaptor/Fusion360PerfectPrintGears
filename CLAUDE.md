@@ -3,7 +3,8 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 A Fusion 360 Python add-in that generates Steve Peterson's "Perfect Print" gears (a
-3D-print-optimized constant-width cycloidal profile) as a matched wheel + pinion pair. v1 outputs
+3D-print-optimized constant-width cycloidal profile) as a matched driving + driven gear pair (the
+driving gear carries the conjugate tip; either may be larger, so reductions, step-ups, or 1:1). v1 outputs
 **solid** gears (extrude + circular pattern) built from fully-constrained parametric sketches.
 
 ## Commands
@@ -29,7 +30,7 @@ helper scripts there.
 Two deliberately separated layers:
 
 - **`core/gear_math.py`** — pure-Python geometry engine. No `adsk`, no numpy. Works in **mm**. Holds
-  the conjugate wheel-tip math, tooth builders, and `closed_gear_polygon` (used by the interference
+  the conjugate driving-gear-tip math, tooth builders, and `closed_gear_polygon` (used by the interference
   test). Unit-testable without Fusion.
 - **Fusion layer** (`core/sketch_builder.py`, `commands/generateGears/entry.py`,
   `lib/fusionAddInUtils/`) — renders engine output into a fully-constrained parametric sketch, then
@@ -37,8 +38,8 @@ Two deliberately separated layers:
 
 ## Critical constraints
 
-- **The conjugate geometry is solved and validated — do not re-derive or "fix" it.** The wheel tip is
-  the conjugate of the straight constant-width pinion flank; the ~12° corner at the flank/tip join is
+- **The conjugate geometry is solved and validated — do not re-derive or "fix" it.** The driving
+  gear's tip is the conjugate of the straight constant-width driven-gear flank; the ~12° corner at the flank/tip join is
   real and intentional (forcing tangency deviates more). Feature width is derived from the module, not
   a user input — Peterson's tip cannot be regenerated parametrically, so changing any input means
   re-running the add-in. `tests/test_interference.py` is the guard: it rolls the closed gear outlines
