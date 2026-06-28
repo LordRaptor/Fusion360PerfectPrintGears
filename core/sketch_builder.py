@@ -565,6 +565,10 @@ def build_pair(driving_component: adsk.fusion.Component, driving_occurrence,
         ci = root.constructionPlanes.createInput()
         ci.setByOffset(plane, adsk.core.ValueInput.createByReal(0.0))
         plane = root.constructionPlanes.add(ci)
+        try:
+            plane.name = f'PPG Gear Plane {pair.driving.teeth}T-{pair.driven.teeth}T'
+        except Exception:
+            futil.handle_error('name gear construction plane')
     _, driving_pitch, driving_xy = build_gear(driving_component, driving_occurrence,
                                               pair.driving, thickness_mm,
                                               f'PPG Driving {pair.driving.teeth}T',
