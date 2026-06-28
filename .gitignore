@@ -4,6 +4,6 @@ __pycache__/
 .pytest_cache/
 PerfectPrintGears.log
 /.vscode/
-/.idea/workspace.xml
+/.idea/
 /.ai/
 /docs/

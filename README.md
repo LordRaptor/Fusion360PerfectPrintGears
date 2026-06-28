@@ -132,4 +132,6 @@ The Perfect Print gear method is credited to **Steve Peterson** (*Clock Design
 Guidelines*). This repository is an independent add-in implementing it.
 
 This add-in is licensed under the **[Apache License 2.0](LICENSE)**. The license
-covers the add-in's source code only, not the underlying gear design method.
+covers the add-in's source code only, not the underlying gear design method. See
+[`NOTICE`](NOTICE) for third-party attributions (the add-in scaffolding derives
+from Autodesk's Fusion 360 sample template).

@@ -1,0 +1,19 @@
+Perfect Print Gears — Fusion 360 Add-in
+Copyright 2026 Christopher Schank
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+----------------------------------------------------------------------
+
+This add-in's scaffolding — the `lib/fusionAddInUtils/` helpers and the
+command/add-in entry-point structure — is derived from Autodesk's official
+Fusion 360 add-in sample template, which is distributed under the Apache
+License, Version 2.0.
+
+    Copyright Autodesk, Inc.
+    https://github.com/AutodeskFusion360
+
+The "Perfect Print gear" geometry method is the work of Steve Peterson,
+documented in his Clock Design Guidelines. This add-in is an independent
+implementation of that method; it is not affiliated with or endorsed by
+Steve Peterson. See https://www.stevesclocks.com.
