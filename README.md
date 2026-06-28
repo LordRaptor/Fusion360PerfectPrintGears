@@ -117,17 +117,19 @@ cannot be driven headless; it is verified by loading the add-in in Fusion.
 | `core/settings.py` | Pure (de)serialization of dialog settings. |
 | `commands/generateGears/entry.py` | Command, dialog, validation, persistence. |
 | `tests/` | pytest for the engine, settings, and interference guard. |
-| `docs/` | Design spec and implementation plan. |
 
 ---
 
-## Scope (v1)
+## Scope
 
 Solid gear bodies (extrude + circular pattern) — no fillets, bores, or motion
-links; both gears are drawn into one selected component (not auto-split); single
-mesh per run; spur (non-helical/bevel/internal) gears.
+links; one wheel + pinion mesh per run (the pair can be split across two
+components or built into one); spur gears only (non-helical/bevel/internal).
 
 ## License & attribution
 
 The Perfect Print gear method is credited to **Steve Peterson** (*Clock Design
 Guidelines*). This repository is an independent add-in implementing it.
+
+This add-in is licensed under the **[Apache License 2.0](LICENSE)**. The license
+covers the add-in's source code only, not the underlying gear design method.
