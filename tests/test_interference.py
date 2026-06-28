@@ -81,7 +81,11 @@ def _max_penetration(inp):
     return max(penetration(-tp + 2.0 * tp * i / (n - 1)) for i in range(n))
 
 
-@pytest.mark.parametrize("nw,np_", [(50, 10), (36, 12), (56, 8)])
+@pytest.mark.parametrize("nw,np_", [
+    (50, 10), (36, 12), (56, 8),     # step-ups (driving > driven)
+    (20, 20),                        # 1:1
+    (10, 40), (12, 36), (6, 24),     # reductions (driving < driven)
+])
 def test_no_interference_with_backlash(nw, np_):
     # Realistic tooth fraction (< 0.5) gives circumferential backlash; the driving
     # flanks never overlap -> ~0 penetration across the whole mesh cycle.
@@ -99,3 +103,12 @@ def test_zone_actually_captures_contact():
                         tooth_fraction=0.5, clearance_mm=0.1, resolution=8)
     depth_um = _max_penetration(inp) * 1000.0
     assert depth_um > 1.0, "mesh zone captured no contact (false-zero) -- check the zone"
+
+
+def test_zone_captures_contact_reduction():
+    # Same false-zero guard as above, but for a reduction (driving < driven): at the
+    # snug fraction the driving flanks touch, so the zone MUST report nonzero depth.
+    inp = gm.GearInputs(wheel_teeth=10, pinion_teeth=40, module_mm=1.5,
+                        tooth_fraction=0.5, clearance_mm=0.1, resolution=8)
+    depth_um = _max_penetration(inp) * 1000.0
+    assert depth_um > 1.0, "mesh zone captured no contact for a reduction (false-zero)"
