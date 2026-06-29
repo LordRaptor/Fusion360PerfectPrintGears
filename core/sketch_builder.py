@@ -29,7 +29,7 @@ def _draw_outline(sketch, segments, cx_mm, cy_mm):
     lines = sketch.sketchCurves.sketchLines
     arcs = sketch.sketchCurves.sketchArcs
     cpsplines = sketch.sketchCurves.sketchControlPointSplines
-    earcs = sketch.sketchCurves.sketchEllipticalArcs
+    ellipses = sketch.sketchCurves.sketchEllipses
     drawn = []
     for seg in segments:
         pts = [(p[0] + cx_mm, p[1] + cy_mm) for p in seg.points]
@@ -47,18 +47,16 @@ def _draw_outline(sketch, segments, cx_mm, cy_mm):
                    else adsk.fusion.SplineDegrees.SplineDegreeThree)
             ent = cpsplines.add(ctrl, deg)
         elif seg.kind == 'earc':
-            # Elliptical-arc cap (the driven 'Perfect Print blue' tip). points are
-            # [center, start, apex, end]; major axis = center->end (tangential,
-            # radius hw), minor axis = center->apex (radial, radius 0.75*hw). The two
-            # axis args are Vector3D whose MAGNITUDE is the radius (in cm). addByEndPoints
-            # sweeps CCW from its 1st to its 2nd point; passing (end, start) sweeps the
-            # OUTWARD half (through the apex). Passing (start, end) takes the inward half.
+            # Draw the driven cap as a FULL ellipse (a UI-native, fully-constrainable
+            # entity with no start/sweep DOF -- unlike an elliptical arc it stays put
+            # when the driven gear swings on its free centre). Its OUTER half is the
+            # tooth tip; the inner half lands inside the tooth and is merged away by the
+            # extrude (the tooth join takes every non-disk profile). points are
+            # [center, start, apex, end]: the major-axis point is `end` (tangential
+            # co-vertex, radius hw); the ellipse also passes through `apex` (radial,
+            # 0.75*hw).
             center, start, apex, end = pts          # mm, already offset by (cx_mm, cy_mm)
-            major = adsk.core.Vector3D.create((end[0] - center[0]) * MM_TO_CM,
-                                              (end[1] - center[1]) * MM_TO_CM, 0.0)
-            minor = adsk.core.Vector3D.create((apex[0] - center[0]) * MM_TO_CM,
-                                              (apex[1] - center[1]) * MM_TO_CM, 0.0)
-            ent = earcs.addByEndPoints(_pt(*center), major, minor, _pt(*end), _pt(*start))
+            ent = ellipses.add(_pt(*center), _pt(*end), _pt(*apex))
         else:
             continue
         drawn.append((seg, ent))
@@ -136,13 +134,24 @@ def _constrain_flanks(sketch, flank_lines, root_circle, gcx_cm, gcy_cm,
         futil.handle_error('flank width offset dimension')
 
     if pitch_circle is not None:
-        # driven: the flanks now end at the elliptical cap's co-vertices, 0.25*hw
-        # INSIDE the pitch circle -- NOT on it. So we no longer pin the flank tops to
-        # the pitch circle (that would drag them off the ellipse and break the oval
-        # cap). The driven flank length is fixed by the cap instead (the elliptical
-        # arc's co-vertices + its center offset; constraints TBD live in Fusion).
-        # Left intentionally length-free here for the first draw test.
-        pass
+        # driven: the flanks end at the elliptical cap's co-vertices, 0.25*hw INSIDE
+        # the pitch circle -- NOT on it (so we can't pin the tops to the pitch circle;
+        # that would drag them off the ellipse). Fix the length with a distance dim on
+        # f1 + an EQUAL constraint on f2 (symmetry alone does not equalise length, as
+        # for the driving gear). This also pins the cap's radial position, because the
+        # cap endpoints are coincident with the flank tops.
+        try:
+            ltp = adsk.core.Point3D.create((foot1.geometry.x + top1.geometry.x) / 2.0,
+                                           (foot1.geometry.y + top1.geometry.y) / 2.0 - 0.3, 0.0)
+            dims.addDistanceDimension(
+                foot1, top1, adsk.fusion.DimensionOrientations.AlignedDimensionOrientation,
+                ltp, True)
+        except Exception:
+            futil.handle_error('driven flank length dimension')
+        try:
+            gc.addEqual(f1, f2)
+        except Exception:
+            futil.handle_error('driven flank equal length')
     else:
         # driving: length dimension on f1 + equal on f2.
         try:
@@ -462,11 +471,17 @@ def build_gear(component: adsk.fusion.Component, occurrence, profile: gear_math.
                 except Exception:
                     futil.handle_error('mirror tip control points')
     else:
-        # Driven gear cap: coincident the arc endpoints with the flank tops, then make
-        # the arc tangent to ONE flank. Both endpoints are pinned to the flank tops
-        # and the flanks are parallel, so a single tangent already fixes the arc's
-        # radius and orientation -- a second tangent over-constrains the sketch.
-        cap = next((e for (s, e) in drawn if s.kind == 'arc3'), None)
+        # Driven gear cap: a full ellipse (the 'Perfect Print blue' tip). Fully
+        # constrained, all RELATIVE to the gear frame so it swings rigidly with the
+        # free-centre driven gear (5 DOF for an ellipse: centre 2, rotation 1, major 1,
+        # minor 1):
+        #   - centre on the centerline + a distance dim from the gear centre -> centre (2)
+        #   - one flank top coincident on the ellipse -> rotation (1) (the other flank
+        #     top follows by the ellipse's central symmetry, so it is NOT added -- it
+        #     would be redundant)
+        #   - major (tangential) radius dim = hw, minor (radial) radius dim = 0.75*hw (2)
+        # isDriving dims lock at the as-drawn values.
+        cap = next((e for (s, e) in drawn if s.kind == 'earc'), None)
         if cap is not None and len(flank_lines) >= 2:
             gcx, gcy = cx * MM_TO_CM, cy * MM_TO_CM
 
@@ -476,23 +491,37 @@ def build_gear(component: adsk.fusion.Component, occurrence, profile: gear_math.
                 de = math.hypot(ep.geometry.x - gcx, ep.geometry.y - gcy)
                 return ep if ds < de else sp        # end farther from centre
 
-            tops = [_flank_top(f) for f in flank_lines[:2]]
-            for cap_end in (cap.startSketchPoint, cap.endSketchPoint):
-                best, bestd = None, 1e18
-                for t in tops:
-                    d = math.hypot(cap_end.geometry.x - t.geometry.x,
-                                   cap_end.geometry.y - t.geometry.y)
-                    if d < bestd:
-                        bestd, best = d, t
-                if best is not None:
-                    try:
-                        gc.addCoincident(cap_end, best)
-                    except Exception:
-                        futil.handle_error('cap endpoint coincident with flank top')
+            # Constrain the ellipse via its AXIS CONSTRUCTION LINES only (never the
+            # ellipse curve): tying BOTH major-axis endpoints (the co-vertices) to the
+            # two flank tops pins the centre, the tangential orientation AND the major
+            # radius at once; coinciding the minor-axis OUTER endpoint (apex) with the
+            # centerline endpoint pins the radial bulge (that endpoint sits on the
+            # dimensioned, concentric addendum circle, whose radius equals the apex
+            # distance by construction). No collinear / centre dim / apex-on-curve needed.
+            def _outer(line):
+                a, b = line.startSketchPoint, line.endSketchPoint
+                da = math.hypot(a.geometry.x - gcx, a.geometry.y - gcy)
+                db = math.hypot(b.geometry.x - gcx, b.geometry.y - gcy)
+                return b if db > da else a            # endpoint farther from gear centre
+
+            tops = [_flank_top(flank_lines[0]), _flank_top(flank_lines[1])]
+
+            def _nearer_top(p):
+                d0 = math.hypot(p.geometry.x - tops[0].geometry.x, p.geometry.y - tops[0].geometry.y)
+                d1 = math.hypot(p.geometry.x - tops[1].geometry.x, p.geometry.y - tops[1].geometry.y)
+                return tops[0] if d0 < d1 else tops[1]
+
+            mj0 = cap.majorAxisLine.startSketchPoint
+            mj1 = cap.majorAxisLine.endSketchPoint
             try:
-                gc.addTangent(cap, flank_lines[0])
+                gc.addCoincident(mj0, _nearer_top(mj0))
+                gc.addCoincident(mj1, _nearer_top(mj1))
             except Exception:
-                futil.handle_error('cap tangent to flank')
+                futil.handle_error('major axis endpoints coincident with flank tops')
+            try:
+                gc.addCoincident(_outer(cap.minorAxisLine), centerline.endSketchPoint)
+            except Exception:
+                futil.handle_error('minor axis apex coincident with centerline end')
 
         # Phase: pin the driven gear's rotation with an angular dimension between its
         # centerline and the line of centers (driven centre -> driving centre). The
