@@ -291,7 +291,9 @@ def _earc_curve(center: Point, start: Point, apex: Point, end: Point,
                 n: int = 24) -> List[Point]:
     """Sample the elliptical arc start -> apex -> end. The ellipse is reconstructed
     from the points (rotation-safe): major axis = center->end (radius b), minor axis
-    = center->apex (radius a). Sweeps theta in [-pi/2, +pi/2] so theta=0 hits apex."""
+    = center->apex (radius a). Sweeps theta in [-pi/2, +pi/2] so theta=0 hits apex.
+    Contract: a, b > 0 (axes come from validated gear geometry, no zero-length axis);
+    `start` (points[1]) is unused -- the arc start is reconstructed at theta=-pi/2."""
     cx, cy = center
     ux, uy = end[0] - cx, end[1] - cy           # major (tangential) direction
     b = math.hypot(ux, uy)
@@ -389,7 +391,7 @@ def driving_tip_points(inp: GearInputs, geo: DerivedGeometry,
 # ===================================================================== segments
 @dataclass
 class Segment:
-    kind: str                            # 'line' | 'arc3' | 'cpspline'
+    kind: str                            # 'line' | 'arc3' | 'cpspline' | 'earc'
     points: List[Point]                  # for 'cpspline': the Bezier control points
     degree: int = 0                      # for 'cpspline': Bezier degree (3 or 5)
 

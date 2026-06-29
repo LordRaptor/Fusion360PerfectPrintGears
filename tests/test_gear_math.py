@@ -408,3 +408,8 @@ def test_earc_densify_survives_rotation():
     for x, y in pts:
         d = math.hypot(x - rc[0], y - rc[1])
         assert 1.0 - 1e-6 <= d <= 2.0 + 1e-6
+    # apex sits on the minor/radial semi-axis (1), endpoint on the major/tangential (2)
+    rapex, rend = rot.points[2], rot.points[3]
+    assert math.hypot(rapex[0] - rc[0], rapex[1] - rc[1]) == pytest.approx(1.0, abs=1e-6)
+    assert math.hypot(rend[0] - rc[0], rend[1] - rc[1]) == pytest.approx(2.0, abs=1e-6)
+    assert math.hypot(pts[-1][0] - rc[0], pts[-1][1] - rc[1]) == pytest.approx(2.0, abs=1e-6)
