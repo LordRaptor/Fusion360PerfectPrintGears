@@ -112,3 +112,69 @@ def test_zone_captures_contact_reduction():
                         tooth_fraction=0.5, clearance_mm=0.1, resolution=8)
     depth_um = _max_penetration(inp) * 1000.0
     assert depth_um > 1.0, "mesh zone captured no contact for a reduction (false-zero)"
+
+
+def _round_driven_tooth(inp, geo):
+    """The OLD semicircular driven tip, rebuilt locally as the regression baseline."""
+    rp, hw = geo.pitch_radius_driven, geo.half_w
+    flank_top_x = math.sqrt(rp ** 2 - hw ** 2)
+    cap_apex_x = flank_top_x + hw
+    driving_apex_x = gm.driving_tip_points(inp, geo)[-1][0]
+    root_radius = rp - ((driving_apex_x - geo.pitch_radius_driving) + inp.clearance_mm) * inp.dedendum_factor
+    foot_x = math.sqrt(root_radius ** 2 - hw ** 2)
+    return [
+        gm.Segment('line', [(foot_x, -hw), (flank_top_x, -hw)]),
+        gm.Segment('arc3', [(flank_top_x, -hw), (cap_apex_x, 0.0), (flank_top_x, hw)]),
+        gm.Segment('line', [(flank_top_x, hw), (foot_x, hw)]),
+    ]
+
+
+def _max_penetration_with(inp, driven_builder):
+    """Copy of _max_penetration but with a swappable driven-tooth builder."""
+    geo = gm.derive_geometry(inp)
+    rw, rp = geo.pitch_radius_driving, geo.pitch_radius_driven
+    C, ratio, m = geo.center_distance, geo.ratio, inp.module_mm
+    base = math.pi + math.pi / inp.driven_teeth
+    driving_local = gm.closed_gear_polygon(gm.build_driving_tooth(inp, geo),
+                                           inp.driving_teeth, 0.0, n_spline=18, n_arc=8)
+    driven_local = gm.closed_gear_polygon(driven_builder(inp, geo),
+                                          inp.driven_teeth, base, n_spline=18, n_arc=8)
+    zx0, zx1, zy = rw - 4 * m, rw + 4 * m, 4 * m
+
+    def in_zone(p):
+        return zx0 < p[0] < zx1 and -zy < p[1] < zy
+
+    def penetration(tau):
+        w = _place(driving_local, -tau / ratio, 0.0, 0.0)
+        p = _place(driven_local, tau, C, 0.0)
+        depth = 0.0
+        for q in w:
+            if in_zone(q) and _point_in_poly(q[0], q[1], p):
+                depth = max(depth, _dist_to_poly(q[0], q[1], p))
+        for q in p:
+            if in_zone(q) and _point_in_poly(q[0], q[1], w):
+                depth = max(depth, _dist_to_poly(q[0], q[1], w))
+        return depth
+
+    tp = 2.0 * math.pi / inp.driven_teeth
+    n = 41
+    return max(penetration(-tp + 2.0 * tp * i / (n - 1)) for i in range(n))
+
+
+@pytest.mark.parametrize("nw,np_", [(10, 40), (6, 24)])
+def test_oval_tip_beats_round_tip_at_snug_fit(nw, np_, monkeypatch):
+    # At the snug fraction (0.5) the round tip's corners interfere; the oval must do
+    # strictly better for these small-driven ratios where the tip dominates contact.
+    # Baseline = the self-consistent HISTORICAL round design: round driven tip AND a
+    # driving root sized for it (restore the old _driven_cap_apex_x for the baseline,
+    # else the tall round tip meshes against the new shallow oval-sized driving root
+    # and the comparison is an artifact).
+    inp = gm.GearInputs(driving_teeth=nw, driven_teeth=np_, module_mm=1.5,
+                        tooth_fraction=0.5, clearance_mm=0.1, resolution=8)
+    oval = _max_penetration_with(inp, gm.build_driven_tooth) * 1000.0
+    monkeypatch.setattr(
+        gm, "_driven_cap_apex_x",
+        lambda geo: math.sqrt(geo.pitch_radius_driven ** 2 - geo.half_w ** 2) + geo.half_w,
+    )
+    round_ = _max_penetration_with(inp, _round_driven_tooth) * 1000.0
+    assert oval < round_ - 5.0, f"oval {oval:.1f} not clearly better than round {round_:.1f} um"
