@@ -397,7 +397,9 @@ class Segment:
 
 
 def _driven_cap_apex_x(geo: DerivedGeometry) -> float:
-    return math.sqrt(geo.pitch_radius_driven ** 2 - geo.half_w ** 2) + geo.half_w
+    # elliptical cap: co-vertex 0.25*hw inside the pitch circle, apex 0.5*hw beyond it
+    chord_x = math.sqrt(geo.pitch_radius_driven ** 2 - geo.half_w ** 2)
+    return chord_x + 0.5 * geo.half_w
 
 
 def build_driving_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
@@ -441,13 +443,17 @@ def build_driving_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
 
 def build_driven_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
     """One driven tooth centered on the +x axis: two parallel straight flanks a
-    feature-width apart ending ON the driven pitch circle, capped by a semicircular
-    tip (radius half_w, centered just inside the pitch circle). The tip is free
-    (never contacts the driving gear); only the flanks are working surfaces."""
+    feature-width apart, capped by an elliptical tip. The flanks end 0.25*half_w
+    INSIDE the pitch circle at the ellipse co-vertices, where the cap meets them
+    tangentially (the ellipse tangent is vertical there). The ellipse has radial
+    (minor) semi-axis 0.75*half_w and tangential (major) semi-axis half_w; its apex
+    bulges 0.5*half_w beyond the pitch circle. The tip is free (never contacts the
+    driving gear); only the flanks are working surfaces."""
     rp = geo.pitch_radius_driven
     hw = geo.half_w
-    flank_top_x = math.sqrt(rp ** 2 - hw ** 2)       # flank ends on the pitch circle
-    cap_apex_x = flank_top_x + hw
+    a = 0.75 * hw                                    # radial (minor) semi-axis
+    chord_x = math.sqrt(rp ** 2 - hw ** 2)           # pitch-circle crossing
+    co_x = chord_x - 0.25 * hw                        # flank top / ellipse co-vertex
 
     # root clears the MATING tooth's tip (driving apex) + clearance
     driving_apex_x = driving_tip_points(inp, geo)[-1][0]
@@ -456,11 +462,18 @@ def build_driven_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
     if root_radius <= hw:
         raise ValueError("computed driven root radius is too small; teeth too large")
     foot_x = math.sqrt(root_radius ** 2 - hw ** 2)
+    if foot_x >= co_x:
+        raise ValueError("driven flank too short for the elliptical cap; teeth too large")
+
+    center = (co_x, 0.0)
+    start = (co_x, -hw)                               # lower flank top (co-vertex)
+    apex = (co_x + a, 0.0)                             # outermost point
+    end = (co_x, hw)                                  # upper flank top (co-vertex)
 
     segs: List[Segment] = []
-    segs.append(Segment('line', [(foot_x, -hw), (flank_top_x, -hw)]))
-    segs.append(Segment('arc3', [(flank_top_x, -hw), (cap_apex_x, 0.0), (flank_top_x, hw)]))
-    segs.append(Segment('line', [(flank_top_x, hw), (foot_x, hw)]))
+    segs.append(Segment('line', [(foot_x, -hw), start]))
+    segs.append(Segment('earc', [center, start, apex, end]))
+    segs.append(Segment('line', [end, (foot_x, hw)]))
     return segs
 
 
