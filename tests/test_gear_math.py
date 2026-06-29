@@ -282,23 +282,45 @@ def test_fit_tip_bezier_rejects_unsupported_degree():
 
 
 # ---------------------------------------------------------------- driven tooth
-def test_driven_tooth_arc_tip_and_constant_width_flanks():
+def test_driven_tooth_elliptical_tip_and_constant_width_flanks():
     inp = _valid_inputs()
     geo = gm.derive_geometry(inp)
     segs = gm.build_driven_tooth(inp, geo)
 
     kinds = [s.kind for s in segs]
-    assert kinds.count('arc3') == 1
+    assert kinds.count('earc') == 1
     assert kinds.count('line') == 2
     # constant width == feature width
     flanks = [s for s in segs if s.kind == 'line']
     ys = [pt[1] for s in flanks for pt in s.points]
     assert max(ys) - min(ys) == pytest.approx(geo.feature_width_mm, abs=1e-9)
-    # flanks end ON the driven pitch circle; cap bulges half_w beyond
-    flank_top_x = math.sqrt(geo.pitch_radius_driven ** 2 - geo.half_w ** 2)
-    arc = [s for s in segs if s.kind == 'arc3'][0]
-    assert arc.points[0][0] == pytest.approx(flank_top_x, abs=1e-9)
-    assert arc.points[1] == pytest.approx((flank_top_x + geo.half_w, 0.0), abs=1e-9)
+
+    hw = geo.half_w
+    chord_x = math.sqrt(geo.pitch_radius_driven ** 2 - hw ** 2)
+    co_x = chord_x - 0.25 * hw
+    earc = [s for s in segs if s.kind == 'earc'][0]
+    center, start, apex, end = earc.points
+    assert center == pytest.approx((co_x, 0.0), abs=1e-9)            # 0.25hw inside pitch circle
+    assert start == pytest.approx((co_x, -hw), abs=1e-9)            # lower flank top (co-vertex)
+    assert end == pytest.approx((co_x, hw), abs=1e-9)               # upper flank top (co-vertex)
+    assert apex == pytest.approx((chord_x + 0.5 * hw, 0.0), abs=1e-9)  # bulges 0.5hw past pitch circle
+    # radial (minor) semi-axis 0.75hw, tangential (major) semi-axis hw
+    assert math.hypot(apex[0] - center[0], apex[1] - center[1]) == pytest.approx(0.75 * hw, abs=1e-9)
+    assert math.hypot(end[0] - center[0], end[1] - center[1]) == pytest.approx(hw, abs=1e-9)
+    # flanks now end at the co-vertices, NOT on the pitch circle
+    flank_tops_x = [pt[0] for s in flanks for pt in s.points if abs(abs(pt[1]) - hw) < 1e-9]
+    assert max(flank_tops_x) == pytest.approx(co_x, abs=1e-9)
+
+
+def test_driven_cap_apex_x_is_round_envelope_for_driving_root():
+    # _driven_cap_apex_x sizes the DRIVING gear's root clearance and is intentionally
+    # held at the conservative ROUND envelope (chord + hw), NOT the actual oval apex
+    # (chord + 0.5*hw). This keeps the driving tooth unchanged / decoupled from the
+    # oval cap; the shorter real oval tip clears the round-sized root with margin.
+    geo = gm.derive_geometry(_valid_inputs())
+    hw = geo.half_w
+    chord_x = math.sqrt(geo.pitch_radius_driven ** 2 - hw ** 2)
+    assert gm._driven_cap_apex_x(geo) == pytest.approx(chord_x + hw, abs=1e-9)
 
 
 # -------------------------------------------------------------- array + pair
@@ -356,13 +378,24 @@ def test_other_ratio_60_8_builds():
     assert pair.center_distance == pytest.approx(0.8 * (60 + 8) / 2)
 
 
+def _seg_endpoints(seg):
+    """Return (path_start, path_end) for a segment, accounting for earc whose
+    points[0] is the center (not the path start)."""
+    if seg.kind == 'earc':
+        # earc layout: [center, start, apex, end] -- start=points[1], end=points[3]
+        return seg.points[1], seg.points[3]
+    return seg.points[0], seg.points[-1]
+
+
 def test_gear_outlines_form_single_closed_loop():
     inp = _valid_inputs()
     pair = gm.build_gear_pair(inp)
     for prof in (pair.driving, pair.driven):
         segs = prof.segments
         for cur, nxt in zip(segs, segs[1:] + segs[:1]):
-            assert cur.points[-1] == pytest.approx(nxt.points[0], abs=1e-6)
+            _, cur_end = _seg_endpoints(cur)
+            nxt_start, _ = _seg_endpoints(nxt)
+            assert cur_end == pytest.approx(nxt_start, abs=1e-6)
 
 
 # ------------------------------------------------------------------ ratio format
@@ -380,3 +413,36 @@ def test_format_ratio_non_integer_reduces():
 
 def test_format_ratio_equal_counts_is_one_to_one():
     assert gm.format_ratio(20, 20) == "1 : 1"
+
+
+# ------------------------------------------------------------- earc densify
+def test_earc_densify_traces_axis_aligned_ellipse():
+    # right half-ellipse: center (5,0), tangential(major) b=2 along y, radial(minor) a=1 along x
+    center, start, apex, end = (5.0, 0.0), (5.0, -2.0), (6.0, 0.0), (5.0, 2.0)
+    seg = gm.Segment('earc', [center, start, apex, end])
+    pts = gm.densify_segments([seg], n_arc=64)
+    assert pts[0] == pytest.approx((5.0, -2.0), abs=1e-9)    # start
+    assert pts[-1] == pytest.approx((5.0, 2.0), abs=1e-9)    # end
+    # every sample satisfies ((x-cx)/a)^2 + ((y-cy)/b)^2 == 1, and bulges +x (x >= cx)
+    for x, y in pts:
+        assert ((x - 5.0) / 1.0) ** 2 + ((y - 0.0) / 2.0) ** 2 == pytest.approx(1.0, abs=1e-6)
+        assert x >= 5.0 - 1e-9
+    assert max(x for x, _ in pts) == pytest.approx(6.0, abs=1e-6)   # apex reached
+
+
+def test_earc_densify_survives_rotation():
+    # after array_tooth rotates the four points, densify still traces the ellipse
+    center, start, apex, end = (5.0, 0.0), (5.0, -2.0), (6.0, 0.0), (5.0, 2.0)
+    seg = gm.Segment('earc', [center, start, apex, end])
+    rot = gm.array_tooth([seg], teeth=1, base_angle=math.pi / 3)[0]
+    pts = gm.densify_segments([rot], n_arc=64)
+    rc = rot.points[0]
+    # distances to center are bounded by the two semi-axes (1 and 2)
+    for x, y in pts:
+        d = math.hypot(x - rc[0], y - rc[1])
+        assert 1.0 - 1e-6 <= d <= 2.0 + 1e-6
+    # apex sits on the minor/radial semi-axis (1), endpoint on the major/tangential (2)
+    rapex, rend = rot.points[2], rot.points[3]
+    assert math.hypot(rapex[0] - rc[0], rapex[1] - rc[1]) == pytest.approx(1.0, abs=1e-6)
+    assert math.hypot(rend[0] - rc[0], rend[1] - rc[1]) == pytest.approx(2.0, abs=1e-6)
+    assert math.hypot(pts[-1][0] - rc[0], pts[-1][1] - rc[1]) == pytest.approx(2.0, abs=1e-6)

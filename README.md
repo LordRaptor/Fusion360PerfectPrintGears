@@ -95,6 +95,16 @@ dimension. By default the join to the flank is **not** tangent — there is a re
 true envelope more, so the faithful non-tangent shape is the default. The apex is a
 sharp point (your printer rounds it).
 
+The **driven** gear tip is a small **elliptical cap** (Steve Peterson's refinement):
+an oval whose tangential (major) axis spans the tooth width and whose radial (minor)
+axis is shorter (75% aspect), so the tip is flatter than a plain semicircle and is
+centered slightly **inside** the pitch circle. This rounds off the leading corners
+that would otherwise touch before the line of centers, cutting tip interference and
+friction — with little effect on the rolling, since the previous tooth is still
+engaged. The tip is **free** (non-working); only the flanks carry load. Because the
+cap is an ellipse, the driven flanks end just inside the pitch circle (at the
+ellipse's co-vertices, where the cap meets them tangentially) rather than on it.
+
 The engine (`core/gear_math.py`) is **pure Python** (no Fusion, no third-party
 deps), so the conjugation math is unit-tested without Fusion — including a
 **conjugacy/interference test** that rolls the closed gear outlines through a full

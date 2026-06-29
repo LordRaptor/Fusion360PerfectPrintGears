@@ -287,6 +287,28 @@ def _arc3_curve(p1: Point, p2: Point, p3: Point, n: int = 24) -> List[Point]:
              cy + r * math.sin(a1 + (end - a1) * i / n)) for i in range(n + 1)]
 
 
+def _earc_curve(center: Point, start: Point, apex: Point, end: Point,
+                n: int = 24) -> List[Point]:
+    """Sample the elliptical arc start -> apex -> end. The ellipse is reconstructed
+    from the points (rotation-safe): major axis = center->end (radius b), minor axis
+    = center->apex (radius a). Sweeps theta in [-pi/2, +pi/2] so theta=0 hits apex.
+    Contract: a, b > 0 (axes come from validated gear geometry, no zero-length axis);
+    `start` (points[1]) is unused -- the arc start is reconstructed at theta=-pi/2."""
+    cx, cy = center
+    ux, uy = end[0] - cx, end[1] - cy           # major (tangential) direction
+    b = math.hypot(ux, uy)
+    ux, uy = ux / b, uy / b
+    vx, vy = apex[0] - cx, apex[1] - cy          # minor (radial) direction
+    a = math.hypot(vx, vy)
+    vx, vy = vx / a, vy / a
+    out: List[Point] = []
+    for i in range(n + 1):
+        t = -math.pi / 2.0 + math.pi * i / n
+        ca, sb = a * math.cos(t), b * math.sin(t)
+        out.append((cx + ca * vx + sb * ux, cy + ca * vy + sb * uy))
+    return out
+
+
 def _contacting_flank(geo: DerivedGeometry) -> Tuple[Point, Point]:
     """Two points on the contacting driven flank (top flank) at the reference
     instant, in world coords. The driven tooth is placed by alpha = 2*asin(half_w/Rp)
@@ -369,13 +391,20 @@ def driving_tip_points(inp: GearInputs, geo: DerivedGeometry,
 # ===================================================================== segments
 @dataclass
 class Segment:
-    kind: str                            # 'line' | 'arc3' | 'cpspline'
+    kind: str                            # 'line' | 'arc3' | 'cpspline' | 'earc'
     points: List[Point]                  # for 'cpspline': the Bezier control points
     degree: int = 0                      # for 'cpspline': Bezier degree (3 or 5)
 
 
 def _driven_cap_apex_x(geo: DerivedGeometry) -> float:
-    return math.sqrt(geo.pitch_radius_driven ** 2 - geo.half_w ** 2) + geo.half_w
+    """Radial reach used ONLY to size the DRIVING gear's root clearance. Deliberately
+    the ROUND-tip envelope (chord + hw), NOT the actual elliptical cap apex
+    (chord + 0.5*hw): holding it at the larger round value keeps the driving root sized
+    exactly as it was before the oval tip, so the driving tooth is unchanged and the
+    shorter oval tip clears it with margin. This decouples the driven cap shape from the
+    driving gear -- the cap geometry lives entirely in build_driven_tooth."""
+    chord_x = math.sqrt(geo.pitch_radius_driven ** 2 - geo.half_w ** 2)
+    return chord_x + geo.half_w
 
 
 def build_driving_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
@@ -419,13 +448,17 @@ def build_driving_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
 
 def build_driven_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
     """One driven tooth centered on the +x axis: two parallel straight flanks a
-    feature-width apart ending ON the driven pitch circle, capped by a semicircular
-    tip (radius half_w, centered just inside the pitch circle). The tip is free
-    (never contacts the driving gear); only the flanks are working surfaces."""
+    feature-width apart, capped by an elliptical tip. The flanks end 0.25*half_w
+    INSIDE the pitch circle at the ellipse co-vertices, where the cap meets them
+    tangentially (the ellipse tangent is vertical there). The ellipse has radial
+    (minor) semi-axis 0.75*half_w and tangential (major) semi-axis half_w; its apex
+    bulges 0.5*half_w beyond the pitch circle. The tip is free (never contacts the
+    driving gear); only the flanks are working surfaces."""
     rp = geo.pitch_radius_driven
     hw = geo.half_w
-    flank_top_x = math.sqrt(rp ** 2 - hw ** 2)       # flank ends on the pitch circle
-    cap_apex_x = flank_top_x + hw
+    a = 0.75 * hw                                    # radial (minor) semi-axis
+    chord_x = math.sqrt(rp ** 2 - hw ** 2)           # pitch-circle crossing
+    co_x = chord_x - 0.25 * hw                        # flank top / ellipse co-vertex
 
     # root clears the MATING tooth's tip (driving apex) + clearance
     driving_apex_x = driving_tip_points(inp, geo)[-1][0]
@@ -434,11 +467,18 @@ def build_driven_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
     if root_radius <= hw:
         raise ValueError("computed driven root radius is too small; teeth too large")
     foot_x = math.sqrt(root_radius ** 2 - hw ** 2)
+    if foot_x >= co_x:
+        raise ValueError("driven flank too short for the elliptical cap; teeth too large")
+
+    center = (co_x, 0.0)
+    start = (co_x, -hw)                               # lower flank top (co-vertex)
+    apex = (co_x + a, 0.0)                             # outermost point
+    end = (co_x, hw)                                  # upper flank top (co-vertex)
 
     segs: List[Segment] = []
-    segs.append(Segment('line', [(foot_x, -hw), (flank_top_x, -hw)]))
-    segs.append(Segment('arc3', [(flank_top_x, -hw), (cap_apex_x, 0.0), (flank_top_x, hw)]))
-    segs.append(Segment('line', [(flank_top_x, hw), (foot_x, hw)]))
+    segs.append(Segment('line', [(foot_x, -hw), start]))
+    segs.append(Segment('earc', [center, start, apex, end]))
+    segs.append(Segment('line', [end, (foot_x, hw)]))
     return segs
 
 
@@ -542,6 +582,8 @@ def densify_segments(segments: List[Segment], n_spline: int = 24,
             pts = list(s.points)
         elif s.kind == 'arc3':
             pts = _arc3_curve(s.points[0], s.points[1], s.points[2], n_arc)
+        elif s.kind == 'earc':
+            pts = _earc_curve(s.points[0], s.points[1], s.points[2], s.points[3], n_arc)
         elif s.kind == 'cpspline':
             pts = bezier_curve(s.points, n_spline)
         else:
