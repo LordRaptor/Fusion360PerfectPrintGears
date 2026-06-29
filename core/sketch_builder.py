@@ -29,6 +29,7 @@ def _draw_outline(sketch, segments, cx_mm, cy_mm):
     lines = sketch.sketchCurves.sketchLines
     arcs = sketch.sketchCurves.sketchArcs
     cpsplines = sketch.sketchCurves.sketchControlPointSplines
+    earcs = sketch.sketchCurves.sketchEllipticalArcs
     drawn = []
     for seg in segments:
         pts = [(p[0] + cx_mm, p[1] + cy_mm) for p in seg.points]
@@ -45,6 +46,19 @@ def _draw_outline(sketch, segments, cx_mm, cy_mm):
             deg = (adsk.fusion.SplineDegrees.SplineDegreeFive if seg.degree == 5
                    else adsk.fusion.SplineDegrees.SplineDegreeThree)
             ent = cpsplines.add(ctrl, deg)
+        elif seg.kind == 'earc':
+            # Elliptical-arc cap (the driven 'Perfect Print blue' tip). points are
+            # [center, start, apex, end]; major axis = center->end (tangential,
+            # radius hw), minor axis = center->apex (radial, radius 0.75*hw). The two
+            # axis args are Vector3D whose MAGNITUDE is the radius (in cm). addByEndPoints
+            # sweeps CCW from its 1st to its 2nd point; passing (end, start) sweeps the
+            # OUTWARD half (through the apex). Passing (start, end) takes the inward half.
+            center, start, apex, end = pts          # mm, already offset by (cx_mm, cy_mm)
+            major = adsk.core.Vector3D.create((end[0] - center[0]) * MM_TO_CM,
+                                              (end[1] - center[1]) * MM_TO_CM, 0.0)
+            minor = adsk.core.Vector3D.create((apex[0] - center[0]) * MM_TO_CM,
+                                              (apex[1] - center[1]) * MM_TO_CM, 0.0)
+            ent = earcs.addByEndPoints(_pt(*center), major, minor, _pt(*end), _pt(*start))
         else:
             continue
         drawn.append((seg, ent))
@@ -122,12 +136,13 @@ def _constrain_flanks(sketch, flank_lines, root_circle, gcx_cm, gcy_cm,
         futil.handle_error('flank width offset dimension')
 
     if pitch_circle is not None:
-        # driven: flank tops on the pitch circle fix the length (no length dim).
-        for top in (top1, top2):
-            try:
-                gc.addCoincident(top, pitch_circle)
-            except Exception:
-                futil.handle_error('flank top coincident with pitch circle')
+        # driven: the flanks now end at the elliptical cap's co-vertices, 0.25*hw
+        # INSIDE the pitch circle -- NOT on it. So we no longer pin the flank tops to
+        # the pitch circle (that would drag them off the ellipse and break the oval
+        # cap). The driven flank length is fixed by the cap instead (the elliptical
+        # arc's co-vertices + its center offset; constraints TBD live in Fusion).
+        # Left intentionally length-free here for the first draw test.
+        pass
     else:
         # driving: length dimension on f1 + equal on f2.
         try:
