@@ -2,6 +2,49 @@
 
 <!-- version list -->
 
+## v1.8.0 (2026-06-29)
+
+### Chores
+
+- Add gear example step file [skip ci]
+  ([`d04e8f1`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/d04e8f1839c65887d690241c896612948aabc41b))
+
+- Replace gear example step file with elliptical-tip 21/45 pair [skip ci]
+  ([`7470f40`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/7470f4035f1229ea92ee19cbe5c9171124b513a1))
+
+### Documentation
+
+- Describe the elliptical driven tip in README and manifest
+  ([`5a98dcb`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/5a98dcbf91e150db521b1e216f2423f118400669))
+
+### Features
+
+- **engine**: Add 'earc' elliptical-arc segment + densification
+  ([`4008a33`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/4008a3307b124735909da940cb83921197d057a8))
+
+- **engine**: Elliptical driven tip (Perfect Print blue), flanks end inside pitch circle
+  ([`b0badda`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/b0badda138430aa8a6a5387df3fc4cce1a3d9692))
+
+- **fusion**: Draw the driven tip as a native elliptical arc
+  ([`442198a`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/442198a6442fc931e7d9f93a6e163a17bb7ae759))
+
+- **fusion**: Fully constrain the driven oval cap; draw it as a full ellipse
+  ([`e8b9186`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/e8b918620950c192d7fef7b847171e7fa5a6309a))
+
+### Refactoring
+
+- **engine**: Clarify earc contract + strengthen rotation test
+  ([`3b82bb3`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/3b82bb32e908c14f3fc934951bb09d99483fde9f))
+
+- **engine**: Decouple oval tip from the driving tooth
+  ([`4586c63`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/4586c63835135c823a0cb5fe21aa0d5bebfa5dac))
+
+### Testing
+
+- **engine**: Regression guard that the oval tip beats the round tip at snug fit
+  ([`d80d345`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/d80d345d96b73065ce17501d4da8da393cf8121b))
+
+
 ## v1.7.0 (2026-06-28)
 
 ### Documentation

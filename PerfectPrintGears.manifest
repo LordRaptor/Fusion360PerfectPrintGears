@@ -5,7 +5,7 @@
     "description": {
         "": "Generates matched Perfect Print driving + driven gears as solid bodies (reductions, step-ups, or 1:1, any tooth counts >= 6); the driven gear has an elliptical Perfect-Print tip (lower tip interference/friction) and is left free to swing about the driving gear so you can align it with existing features"
     },
-    "version": "1.7.0",
+    "version": "1.8.0",
     "runOnStartup": false,
     "supportedOS": "windows|mac",
     "editEnabled": true
