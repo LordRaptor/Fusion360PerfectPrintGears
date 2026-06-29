@@ -162,19 +162,14 @@ def _max_penetration_with(inp, driven_builder):
 
 
 @pytest.mark.parametrize("nw,np_", [(10, 40), (6, 24)])
-def test_oval_tip_beats_round_tip_at_snug_fit(nw, np_, monkeypatch):
+def test_oval_tip_beats_round_tip_at_snug_fit(nw, np_):
     # At the snug fraction (0.5) the round tip's corners interfere; the oval must do
     # strictly better for these small-driven ratios where the tip dominates contact.
-    # Baseline = the self-consistent HISTORICAL round design: round driven tip AND a
-    # driving root sized for it (restore the old _driven_cap_apex_x for the baseline,
-    # else the tall round tip meshes against the new shallow oval-sized driving root
-    # and the comparison is an artifact).
+    # The driving gear is identical for both builders: _driven_cap_apex_x is held at
+    # the round envelope (see gear_math), so the driving root is round-sized and the
+    # comparison is a fair round-tip vs oval-tip swap on the same driving gear.
     inp = gm.GearInputs(driving_teeth=nw, driven_teeth=np_, module_mm=1.5,
                         tooth_fraction=0.5, clearance_mm=0.1, resolution=8)
     oval = _max_penetration_with(inp, gm.build_driven_tooth) * 1000.0
-    monkeypatch.setattr(
-        gm, "_driven_cap_apex_x",
-        lambda geo: math.sqrt(geo.pitch_radius_driven ** 2 - geo.half_w ** 2) + geo.half_w,
-    )
     round_ = _max_penetration_with(inp, _round_driven_tooth) * 1000.0
     assert oval < round_ - 5.0, f"oval {oval:.1f} not clearly better than round {round_:.1f} um"

@@ -312,11 +312,15 @@ def test_driven_tooth_elliptical_tip_and_constant_width_flanks():
     assert max(flank_tops_x) == pytest.approx(co_x, abs=1e-9)
 
 
-def test_driven_cap_apex_x_matches_elliptical_apex():
+def test_driven_cap_apex_x_is_round_envelope_for_driving_root():
+    # _driven_cap_apex_x sizes the DRIVING gear's root clearance and is intentionally
+    # held at the conservative ROUND envelope (chord + hw), NOT the actual oval apex
+    # (chord + 0.5*hw). This keeps the driving tooth unchanged / decoupled from the
+    # oval cap; the shorter real oval tip clears the round-sized root with margin.
     geo = gm.derive_geometry(_valid_inputs())
     hw = geo.half_w
     chord_x = math.sqrt(geo.pitch_radius_driven ** 2 - hw ** 2)
-    assert gm._driven_cap_apex_x(geo) == pytest.approx(chord_x + 0.5 * hw, abs=1e-9)
+    assert gm._driven_cap_apex_x(geo) == pytest.approx(chord_x + hw, abs=1e-9)
 
 
 # -------------------------------------------------------------- array + pair

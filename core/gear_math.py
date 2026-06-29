@@ -397,9 +397,14 @@ class Segment:
 
 
 def _driven_cap_apex_x(geo: DerivedGeometry) -> float:
-    # elliptical cap: co-vertex 0.25*hw inside the pitch circle, apex 0.5*hw beyond it
+    """Radial reach used ONLY to size the DRIVING gear's root clearance. Deliberately
+    the ROUND-tip envelope (chord + hw), NOT the actual elliptical cap apex
+    (chord + 0.5*hw): holding it at the larger round value keeps the driving root sized
+    exactly as it was before the oval tip, so the driving tooth is unchanged and the
+    shorter oval tip clears it with margin. This decouples the driven cap shape from the
+    driving gear -- the cap geometry lives entirely in build_driven_tooth."""
     chord_x = math.sqrt(geo.pitch_radius_driven ** 2 - geo.half_w ** 2)
-    return chord_x + 0.5 * geo.half_w
+    return chord_x + geo.half_w
 
 
 def build_driving_tooth(inp: GearInputs, geo: DerivedGeometry) -> List[Segment]:
