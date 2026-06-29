@@ -287,6 +287,26 @@ def _arc3_curve(p1: Point, p2: Point, p3: Point, n: int = 24) -> List[Point]:
              cy + r * math.sin(a1 + (end - a1) * i / n)) for i in range(n + 1)]
 
 
+def _earc_curve(center: Point, start: Point, apex: Point, end: Point,
+                n: int = 24) -> List[Point]:
+    """Sample the elliptical arc start -> apex -> end. The ellipse is reconstructed
+    from the points (rotation-safe): major axis = center->end (radius b), minor axis
+    = center->apex (radius a). Sweeps theta in [-pi/2, +pi/2] so theta=0 hits apex."""
+    cx, cy = center
+    ux, uy = end[0] - cx, end[1] - cy           # major (tangential) direction
+    b = math.hypot(ux, uy)
+    ux, uy = ux / b, uy / b
+    vx, vy = apex[0] - cx, apex[1] - cy          # minor (radial) direction
+    a = math.hypot(vx, vy)
+    vx, vy = vx / a, vy / a
+    out: List[Point] = []
+    for i in range(n + 1):
+        t = -math.pi / 2.0 + math.pi * i / n
+        ca, sb = a * math.cos(t), b * math.sin(t)
+        out.append((cx + ca * vx + sb * ux, cy + ca * vy + sb * uy))
+    return out
+
+
 def _contacting_flank(geo: DerivedGeometry) -> Tuple[Point, Point]:
     """Two points on the contacting driven flank (top flank) at the reference
     instant, in world coords. The driven tooth is placed by alpha = 2*asin(half_w/Rp)
@@ -542,6 +562,8 @@ def densify_segments(segments: List[Segment], n_spline: int = 24,
             pts = list(s.points)
         elif s.kind == 'arc3':
             pts = _arc3_curve(s.points[0], s.points[1], s.points[2], n_arc)
+        elif s.kind == 'earc':
+            pts = _earc_curve(s.points[0], s.points[1], s.points[2], s.points[3], n_arc)
         elif s.kind == 'cpspline':
             pts = bezier_curve(s.points, n_spline)
         else:

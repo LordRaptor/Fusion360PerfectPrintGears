@@ -380,3 +380,31 @@ def test_format_ratio_non_integer_reduces():
 
 def test_format_ratio_equal_counts_is_one_to_one():
     assert gm.format_ratio(20, 20) == "1 : 1"
+
+
+# ------------------------------------------------------------- earc densify
+def test_earc_densify_traces_axis_aligned_ellipse():
+    # right half-ellipse: center (5,0), tangential(major) b=2 along y, radial(minor) a=1 along x
+    center, start, apex, end = (5.0, 0.0), (5.0, -2.0), (6.0, 0.0), (5.0, 2.0)
+    seg = gm.Segment('earc', [center, start, apex, end])
+    pts = gm.densify_segments([seg], n_arc=64)
+    assert pts[0] == pytest.approx((5.0, -2.0), abs=1e-9)    # start
+    assert pts[-1] == pytest.approx((5.0, 2.0), abs=1e-9)    # end
+    # every sample satisfies ((x-cx)/a)^2 + ((y-cy)/b)^2 == 1, and bulges +x (x >= cx)
+    for x, y in pts:
+        assert ((x - 5.0) / 1.0) ** 2 + ((y - 0.0) / 2.0) ** 2 == pytest.approx(1.0, abs=1e-6)
+        assert x >= 5.0 - 1e-9
+    assert max(x for x, _ in pts) == pytest.approx(6.0, abs=1e-6)   # apex reached
+
+
+def test_earc_densify_survives_rotation():
+    # after array_tooth rotates the four points, densify still traces the ellipse
+    center, start, apex, end = (5.0, 0.0), (5.0, -2.0), (6.0, 0.0), (5.0, 2.0)
+    seg = gm.Segment('earc', [center, start, apex, end])
+    rot = gm.array_tooth([seg], teeth=1, base_angle=math.pi / 3)[0]
+    pts = gm.densify_segments([rot], n_arc=64)
+    rc = rot.points[0]
+    # distances to center are bounded by the two semi-axes (1 and 2)
+    for x, y in pts:
+        d = math.hypot(x - rc[0], y - rc[1])
+        assert 1.0 - 1e-6 <= d <= 2.0 + 1e-6
