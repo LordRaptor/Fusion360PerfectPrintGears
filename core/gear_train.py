@@ -126,3 +126,43 @@ def _generate(q: TrainQuery, n: int) -> list:
 
     recurse(target, n, ())
     return out
+
+
+@dataclass(frozen=True)
+class SearchResult:
+    trains: list = field(default_factory=list)   # list[GearTrain], ordered
+    truncated: bool = False
+    warnings: tuple = ()
+    error: object = None                          # str | None
+
+
+def _canonical(train: GearTrain) -> tuple:
+    # Direction-aware, order-independent key: (driving, driven) pairs, sorted.
+    return tuple(sorted((s.driving, s.driven) for s in train.stages))
+
+
+def _sort_key(train: GearTrain) -> tuple:
+    return (len(train.stages), train.total_teeth(), _canonical(train))
+
+
+def search(q: TrainQuery) -> SearchResult:
+    """Validate -> normalize -> generate across the stage-count range -> dedup -> order
+    -> cap. Fewest stages first, then most compact (smallest total tooth count)."""
+    errors = validate(q)
+    if errors:
+        return SearchResult(trains=[], truncated=False, warnings=(), error='; '.join(errors))
+
+    q, warnings = normalize(q)
+    seen = {}
+    for n in range(q.min_stages, q.max_stages + 1):
+        for train in _generate(q, n):
+            key = _canonical(train)
+            if key not in seen:
+                seen[key] = train
+
+    trains = sorted(seen.values(), key=_sort_key)
+    truncated = len(trains) > MAX_RESULTS
+    if truncated:
+        trains = trains[:MAX_RESULTS]
+    return SearchResult(trains=trains, truncated=truncated,
+                        warnings=tuple(warnings), error=None)

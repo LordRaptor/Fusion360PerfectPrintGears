@@ -125,3 +125,57 @@ def test_generate_net_reduction_target():
     trains = gt._generate(q, 1)
     assert _ratios(trains) == {Fraction(1, 4)}
     assert ((6, 24),) in _stage_multisets(trains)
+
+
+def test_search_returns_sorted_deduped_results():
+    q = _valid_query(target_num=12, target_den=1, min_stages=1, max_stages=2,
+                     teeth_min=6, teeth_max=60)
+    res = gt.search(q)
+    assert res.error is None
+    assert res.trains, 'expected solutions'
+    # exactness
+    assert all(t.ratio() == Fraction(12, 1) for t in res.trains)
+    # dedup: no two trains share the same direction-aware stage multiset
+    keys = [tuple(sorted((s.driving, s.driven) for s in t.stages)) for t in res.trains]
+    assert len(keys) == len(set(keys))
+    # ordering: (num_stages, total_teeth) non-decreasing
+    order = [(len(t.stages), t.total_teeth()) for t in res.trains]
+    assert order == sorted(order)
+
+
+def test_search_direction_aware_dedup_keeps_reverse_stage():
+    # Dedup keys on (driving, driven) ORDER, so a stage and its reverse are distinct
+    # (reciprocal ratios) and must never be merged -- e.g. a step-up (90/6) vs the
+    # reduction (6/90). Tested directly on _canonical (deterministic, cap-independent);
+    # that a mixed-direction train is actually produced is covered by
+    # test_generate_finds_mixed_direction_train.
+    up = gt.GearTrain(stages=(gt.Stage(90, 6),))
+    down = gt.GearTrain(stages=(gt.Stage(6, 90),))
+    assert gt._canonical(up) != gt._canonical(down)
+
+
+def test_search_reports_error_for_invalid_query():
+    res = gt.search(_valid_query(target_num=0))
+    assert res.error is not None
+    assert res.trains == []
+
+
+def test_search_truncates_and_flags():
+    # A search that overflows the cap must set truncated and clip to MAX_RESULTS.
+    # A 2-stage search for 12:1 over teeth 6..90 yields thousands of exact trains
+    # (far past 200) while staying fast -- loose 3-stage searches are avoided here
+    # because they blow up combinatorially.
+    q = _valid_query(target_num=12, target_den=1, min_stages=1, max_stages=2,
+                     teeth_min=6, teeth_max=90)
+    res = gt.search(q)
+    assert res.truncated is True
+    assert len(res.trains) == gt.MAX_RESULTS
+
+
+def test_search_empty_when_no_solution():
+    # 7 : 1 with a prime 7 that cannot be formed from teeth 8..12 in one stage.
+    q = _valid_query(target_num=7, target_den=1, min_stages=1, max_stages=1,
+                     teeth_min=8, teeth_max=12)
+    res = gt.search(q)
+    assert res.trains == []
+    assert res.error is None
