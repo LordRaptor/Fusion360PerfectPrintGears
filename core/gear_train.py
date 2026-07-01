@@ -46,3 +46,34 @@ class GearTrain:
     def direction(self) -> int:
         # Each external mesh reverses rotation: (-1)^(number of stages).
         return -1 if len(self.stages) % 2 else 1
+
+
+@dataclass(frozen=True)
+class TrainQuery:
+    target_num: int            # P in the target ratio P : Q (any positive rational)
+    target_den: int            # Q
+    min_stages: int
+    max_stages: int
+    teeth_min: int             # single shared range: BOTH gears of every stage
+    teeth_max: int             #   draw from [teeth_min, teeth_max]
+    direction: str = 'any'     # 'same' | 'opposite' | 'any' (rotation sense, not speed)
+    coaxial: bool = False      # input & output share one shaft (equal-tooth-sum rule)
+
+
+def validate(q: TrainQuery) -> list:
+    """Return a list of hard-error strings (empty == valid). Small teeth and the
+    coaxial min-stage bump are WARNINGS handled in normalize(), not errors here."""
+    errors = []
+    if q.target_num <= 0 or q.target_den <= 0:
+        errors.append('Target ratio P and Q must both be positive integers.')
+    if q.teeth_min < 1:
+        errors.append('Minimum tooth count must be at least 1.')
+    if q.teeth_max < q.teeth_min:
+        errors.append('Maximum tooth count must be >= minimum tooth count.')
+    if q.min_stages < 1:
+        errors.append('Minimum stage count must be at least 1.')
+    if q.max_stages < q.min_stages:
+        errors.append('Maximum stage count must be >= minimum stage count.')
+    if q.direction not in ('same', 'opposite', 'any'):
+        errors.append("Direction must be 'same', 'opposite', or 'any'.")
+    return errors

@@ -32,3 +32,31 @@ def test_geartrain_counts_and_direction():
     assert train.total_teeth() == 36 + 6 + 40 + 20
     assert train.direction() == 1             # even stage count -> same sense
     assert gt.GearTrain(stages=(gt.Stage(36, 6),)).direction() == -1
+
+
+def _valid_query(**over):
+    base = dict(target_num=12, target_den=1, min_stages=1, max_stages=2,
+                teeth_min=6, teeth_max=90, direction='any', coaxial=False)
+    base.update(over)
+    return gt.TrainQuery(**base)
+
+
+def test_valid_query_has_no_errors():
+    assert gt.validate(_valid_query()) == []
+
+
+def test_validate_rejects_nonpositive_ratio():
+    errs = gt.validate(_valid_query(target_num=0))
+    assert errs and any('positive' in e for e in errs)
+
+
+def test_validate_allows_reduction_target():
+    # P < Q is now legal (net reduction) -- no error.
+    assert gt.validate(_valid_query(target_num=1, target_den=12)) == []
+
+
+def test_validate_rejects_bad_ranges_and_direction():
+    assert gt.validate(_valid_query(teeth_max=5)) != []          # teeth_max < teeth_min
+    assert gt.validate(_valid_query(max_stages=0)) != []         # max_stages < min_stages
+    assert gt.validate(_valid_query(min_stages=0)) != []         # min_stages < 1
+    assert gt.validate(_valid_query(direction='sideways')) != []
