@@ -92,3 +92,37 @@ def normalize(q: TrainQuery):
         warnings.append(f'Tooth counts below {MIN_TEETH_WARN} are hard to make as '
                         f'cycloidal pinions; some results may be impractical to print.')
     return replace(q, min_stages=min_stages), warnings
+
+
+def _generate(q: TrainQuery, n: int) -> list:
+    """All exact `n`-stage trains over [teeth_min, teeth_max], both directions.
+    Raw list -- may contain reorderings/duplicates; dedup/order happens in search().
+
+    Recursion: `remaining` is the product the not-yet-placed stages must still equal.
+    Placing stage (a, b) consumes a factor, leaving remaining * b / a for the rest.
+    Prune: after placing a stage, k-1 remain, so the child's remaining must lie in
+    [(L/H)^(k-1), (H/L)^(k-1)]. Solving that for b bounds the inner loop to a slice of
+    the range instead of the whole range (and collapses the final stage to exact
+    divisors). Accept a leaf iff remaining == 1.
+    """
+    out = []
+    L, H = q.teeth_min, q.teeth_max
+    target = Fraction(q.target_num, q.target_den)
+
+    def recurse(remaining: Fraction, k: int, stages: tuple):
+        if k == 0:
+            if remaining == 1:
+                out.append(GearTrain(stages))
+            return
+        lo = Fraction(L, H) ** (k - 1)   # child ratio-range lower bound
+        hi = Fraction(H, L) ** (k - 1)   # child ratio-range upper bound
+        for a in range(L, H + 1):
+            # child remaining = remaining * b / a must be in [lo, hi]  =>
+            #   b in [ a*lo/remaining , a*hi/remaining ]
+            b_lo = max(L, math.ceil(a * lo / remaining))
+            b_hi = min(H, math.floor(a * hi / remaining))
+            for b in range(b_lo, b_hi + 1):
+                recurse(remaining * Fraction(b, a), k - 1, stages + (Stage(a, b),))
+
+    recurse(target, n, ())
+    return out

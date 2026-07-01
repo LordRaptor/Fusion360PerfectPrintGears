@@ -77,3 +77,51 @@ def test_normalize_leaves_noncoaxial_alone():
 def test_normalize_warns_on_small_teeth():
     q, warnings = gt.normalize(_valid_query(teeth_min=4))
     assert any('cycloidal' in w.lower() or str(gt.MIN_TEETH_WARN) in w for w in warnings)
+
+
+def _ratios(trains):
+    return {t.ratio() for t in trains}
+
+
+def _stage_multisets(trains):
+    return {tuple(sorted((s.driving, s.driven) for s in t.stages)) for t in trains}
+
+
+def test_generate_single_stage_exact():
+    # 4 : 1 in one stage over teeth 6..48 -> any (a, b) with a/b == 4, e.g. (24,6),(48,12)
+    q = _valid_query(target_num=4, target_den=1, teeth_min=6, teeth_max=48)
+    trains = gt._generate(q, 1)
+    assert trains, 'expected at least one single-stage solution'
+    assert _ratios(trains) == {Fraction(4, 1)}
+    # _stage_multisets wraps each train's stages in a tuple, so a single-stage train's
+    # key is a 1-tuple of the (driving, driven) pair.
+    assert ((24, 6),) in _stage_multisets(trains)
+    assert ((48, 12),) in _stage_multisets(trains)
+
+
+def test_generate_two_stage_finds_known_trains():
+    q = _valid_query(target_num=12, target_den=1, teeth_min=6, teeth_max=90)
+    ms = _stage_multisets(gt._generate(q, 2))
+    assert tuple(sorted([(36, 6), (40, 20)])) in ms      # 6 * 2
+    assert tuple(sorted([(48, 8), (30, 15)])) in ms      # 6 * 2
+
+
+def test_generate_finds_mixed_direction_train():
+    # (90/6) * (72/90) = 15 * 4/5 = 12 : the second stage is a reduction (driving<driven).
+    q = _valid_query(target_num=12, target_den=1, teeth_min=6, teeth_max=90)
+    ms = _stage_multisets(gt._generate(q, 2))
+    assert tuple(sorted([(90, 6), (72, 90)])) in ms
+
+
+def test_generate_every_train_is_exact():
+    q = _valid_query(target_num=12, target_den=1, teeth_min=6, teeth_max=60)
+    for t in gt._generate(q, 2):
+        assert t.ratio() == Fraction(12, 1)
+
+
+def test_generate_net_reduction_target():
+    # 1 : 4 over one stage -> driving < driven, e.g. (6, 24).
+    q = _valid_query(target_num=1, target_den=4, teeth_min=6, teeth_max=48)
+    trains = gt._generate(q, 1)
+    assert _ratios(trains) == {Fraction(1, 4)}
+    assert ((6, 24),) in _stage_multisets(trains)
