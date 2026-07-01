@@ -179,3 +179,25 @@ def test_search_empty_when_no_solution():
     res = gt.search(q)
     assert res.trains == []
     assert res.error is None
+
+
+def test_direction_same_keeps_only_even_stage_counts():
+    q = _valid_query(target_num=12, target_den=1, min_stages=1, max_stages=3,
+                     teeth_min=6, teeth_max=60, direction='same')
+    res = gt.search(q)
+    assert res.trains
+    assert all(len(t.stages) % 2 == 0 for t in res.trains)
+    assert all(t.direction() == 1 for t in res.trains)
+
+
+def test_direction_opposite_keeps_only_odd_stage_counts():
+    # 'opposite' keeps only ODD stage counts. With max_stages=2 the filter skips the
+    # even count (n=2) entirely and searches only n=1 (fast, avoids the 3-stage blowup);
+    # teeth_max=90 so 12:1 has single-stage solutions (72/6, 84/7). If the parity filter
+    # were broken, n=2 would run and inject even-stage trains, failing the all-odd check.
+    q = _valid_query(target_num=12, target_den=1, min_stages=1, max_stages=2,
+                     teeth_min=6, teeth_max=90, direction='opposite')
+    res = gt.search(q)
+    assert res.trains
+    assert all(len(t.stages) % 2 == 1 for t in res.trains)
+    assert all(t.direction() == -1 for t in res.trains)

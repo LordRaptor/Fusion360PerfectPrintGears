@@ -155,6 +155,10 @@ def search(q: TrainQuery) -> SearchResult:
     q, warnings = normalize(q)
     seen = {}
     for n in range(q.min_stages, q.max_stages + 1):
+        if q.direction == 'same' and n % 2 != 0:
+            continue
+        if q.direction == 'opposite' and n % 2 == 0:
+            continue
         for train in _generate(q, n):
             key = _canonical(train)
             if key not in seen:
