@@ -77,3 +77,18 @@ def validate(q: TrainQuery) -> list:
     if q.direction not in ('same', 'opposite', 'any'):
         errors.append("Direction must be 'same', 'opposite', or 'any'.")
     return errors
+
+
+def normalize(q: TrainQuery):
+    """Return (adjusted_query, warnings). Coaxial forces >= 2 stages; very small tooth
+    counts are flagged. These are advisories, never errors."""
+    warnings = []
+    min_stages = q.min_stages
+    if q.coaxial and min_stages < 2:
+        min_stages = 2
+        warnings.append('Coaxial input/output requires at least 2 stages; '
+                        'raised the minimum stage count to 2.')
+    if q.teeth_min < MIN_TEETH_WARN:
+        warnings.append(f'Tooth counts below {MIN_TEETH_WARN} are hard to make as '
+                        f'cycloidal pinions; some results may be impractical to print.')
+    return replace(q, min_stages=min_stages), warnings

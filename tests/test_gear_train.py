@@ -60,3 +60,20 @@ def test_validate_rejects_bad_ranges_and_direction():
     assert gt.validate(_valid_query(max_stages=0)) != []         # max_stages < min_stages
     assert gt.validate(_valid_query(min_stages=0)) != []         # min_stages < 1
     assert gt.validate(_valid_query(direction='sideways')) != []
+
+
+def test_normalize_raises_min_stages_for_coaxial():
+    q, warnings = gt.normalize(_valid_query(min_stages=1, coaxial=True))
+    assert q.min_stages == 2
+    assert any('2 stages' in w or 'coaxial' in w.lower() for w in warnings)
+
+
+def test_normalize_leaves_noncoaxial_alone():
+    q, warnings = gt.normalize(_valid_query(min_stages=1, coaxial=False))
+    assert q.min_stages == 1
+    assert warnings == []
+
+
+def test_normalize_warns_on_small_teeth():
+    q, warnings = gt.normalize(_valid_query(teeth_min=4))
+    assert any('cycloidal' in w.lower() or str(gt.MIN_TEETH_WARN) in w for w in warnings)
