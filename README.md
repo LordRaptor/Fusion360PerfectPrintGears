@@ -34,6 +34,8 @@ constant velocity, low friction, and prints cleanly without fine involute detail
   Very low driving-gear tooth counts mesh more tightly; use `tooth_fraction` ≈ 0.40–0.45 for
   extra backlash in those cases.
 - Persists your last-used settings on the document and pre-fills them next run.
+- Also ships a separate **[Gear Train Calculator](#gear-train-calculator)** — a display-only
+  palette that finds compound gear trains hitting an exact target ratio (it creates no geometry).
 
 Because the driving gear tip is conjugate to one specific driven gear, **every driving/driven
 pair is unique** and must be generated together for its mating partner.
@@ -63,6 +65,7 @@ Open **Solid → Create → Generate Perfect Print Gears** and set:
 | **Driving gear center** *(optional)* | Point (sketch point, construction point, or vertex) to place the driving gear center on (defaults to the sketch origin). The driven gear meshes relative to the driving gear. |
 | **Driving / Driven gear teeth** | Tooth counts, each ≥ 6. The driving gear carries the conjugate tip; either may be larger, so the pair can be a **reduction** (driving < driven), **step-up** (driving > driven), or **1:1**. |
 | **Gear ratio** *(read-only)* | Displays the resulting ratio as a decimal and reduced integer form, e.g. `3.33 : 1 (10 : 3)`. Updates live as tooth counts change. |
+| **Sizes** *(read-only)* | Previews each gear's **pitch diameter** (`module × teeth`) and the **center distance** between them (sum of pitch radii). Updates live as tooth counts or module change. |
 | **Tooth sizing → Module (mm)** | Sets the tooth size / pitch. `circular pitch = π · module`. Mutually linked with tooth width (editing one updates the other). |
 | **Tooth sizing → Tooth width (mm)** | The physical tooth width — **editable and mutually linked with module**. Editing it back-solves the module at the current tooth fraction (`module = tooth_width / (tooth_fraction · π)`); editing module or tooth fraction recomputes it (`tooth_width = tooth_fraction · π · module`). Lets you dial in a specific width for 3D printing. |
 | **Tooth sizing → Tooth fraction** | Tooth width as a fraction of the circular pitch (0–0.5). **This is the backlash knob:** 0.5 = equal tooth and space; below 0.5 thins the teeth for circumferential play. Editing it recomputes tooth width (module pinned). |
