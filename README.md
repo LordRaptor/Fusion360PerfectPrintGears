@@ -46,8 +46,8 @@ pair is unique** and must be generated together for its mating partner.
 2. In Fusion 360: **Utilities → Add-Ins → Scripts and Add-Ins**.
 3. On the **Add-Ins** tab, click the green **+**, select this folder, and **Run**
    (tick *Run on Startup* if you want it loaded automatically).
-4. Two commands appear under **Solid → Create**: **Generate Perfect Print Gears** and the
-   **Gear Train Calculator** palette.
+4. Two commands appear: **Solid → Create → Generate Perfect Print Gears**, and
+   **Utilities → Add-Ins → Gear Train Calculator** (the palette).
 
 ---
 
@@ -82,7 +82,7 @@ message.
 
 ## Gear Train Calculator
 
-A second command adds a non-modal **Palette** (SOLID workspace → CREATE panel → *Gear Train
+A second command adds a non-modal **Palette** (UTILITIES tab → ADD-INS panel → *Gear Train
 Calculator*) that searches for **compound clock gear trains** hitting an **exact** target
 ratio. It is a pure calculator — it creates no geometry.
 

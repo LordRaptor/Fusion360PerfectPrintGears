@@ -12,9 +12,11 @@ ui = app.userInterface
 CMD_ID = f'{config.COMPANY_NAME}_{config.ADDIN_NAME}_calcGearTrain'
 CMD_NAME = 'Gear Train Calculator'
 CMD_DESC = 'Find compound clock gear trains that hit an exact target ratio'
-IS_PROMOTED = False
+IS_PROMOTED = True         # pin the button in the panel's visible (collapsed) row
 WORKSPACE_ID = 'FusionSolidEnvironment'
-PANEL_ID = 'SolidCreatePanel'
+# UTILITIES tab -> ADD-INS panel (the conventional home for add-in tools). This is a
+# display-only calculator, so it does NOT belong on SOLID -> CREATE with the generator.
+PANEL_ID = 'SolidScriptsAddinsPanel'
 ICON_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'resources', '')
 
 PALETTE_ID = f'{config.COMPANY_NAME}_{config.ADDIN_NAME}_gearTrainPalette'
@@ -34,6 +36,7 @@ def start():
     panel = workspace.toolbarPanels.itemById(PANEL_ID)
     control = panel.controls.addCommand(cmd_def)
     control.isPromoted = IS_PROMOTED
+    control.isPromotedByDefault = IS_PROMOTED   # stays pinned across UI resets
 
 
 def stop():
