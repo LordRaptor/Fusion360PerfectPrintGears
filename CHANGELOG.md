@@ -2,6 +2,85 @@
 
 <!-- version list -->
 
+## v1.9.0 (2026-07-04)
+
+### Bug Fixes
+
+- **fusion**: Use forward slashes in palette htmlFileURL
+  ([`86feaf1`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/86feaf1d3c70e4fbc9dde1935e7fad96577b8f7e))
+
+### Documentation
+
+- Add 21/45 gear pair DXF example
+  ([`715d294`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/715d294b7acd08f7da7fb2000e3fee1ba7a208e2))
+
+- Credit Steve Peterson and link his site in the add-in description
+  ([`7b058fe`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/7b058fea69eb6f9582a2e2866fe8fbfb4d19635b))
+
+- Document the gear-train calculator command
+  ([`b7776da`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/b7776da51cddfdd42839ca3727b1d9f1aaf4ff8b))
+
+- Document the Sizes readout and the calculator in the README overview
+  ([`0246070`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/02460704076ca98d2ae03ea9e69326428cb6ac08))
+
+### Features
+
+- **engine**: Add gear-train data model (Stage, GearTrain)
+  ([`1f32264`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/1f322644672bd5ec8c0eff4f0c086615301292f8))
+
+- **engine**: Add TrainQuery and query validation
+  ([`2f361d4`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/2f361d471977542da1450d1f75c970de0ab7045d))
+
+- **engine**: Coaxial equal-tooth-sum constraint
+  ([`e577cf6`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/e577cf616f8e7d65423fc09b2885fbbb6fb77031))
+
+- **engine**: JSON serialization of search results
+  ([`7d58986`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/7d58986d58a0c4273e178b919b202a17a8bfbb4f))
+
+- **engine**: Normalize queries (coaxial min-stage bump, warnings)
+  ([`a7be110`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/a7be1107bbe6e37a338240519503a97252e9a1fa))
+
+- **engine**: Pruned recursive search for exact n-stage trains
+  ([`52c5975`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/52c59752b7d0b0d1f1263a96abcab8bcf239eca8))
+
+- **engine**: Rotation-direction parity filter in search()
+  ([`6af526e`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/6af526e3b3db55936c867d807f4965b7f9984f00))
+
+- **engine**: Search() with dedup, ordering, and result cap
+  ([`c4f37af`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/c4f37af26d4d163b5643a423b77cb04ee683bc25))
+
+- **fusion**: Add gear-train calculator palette launcher
+  ([`8d4e56f`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/8d4e56f943836dea45e0e1194d9d50cdfb79b430))
+
+- **fusion**: Add search busy indicator; default rotation to same-as-input
+  ([`a1b2342`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/a1b23423714587e0647fc57f3423aaec66665112))
+
+- **fusion**: Dedicated gear+table icon for the gear-train calculator
+  ([`1a2facb`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/1a2facb7a489fee6ff689c555370842c353c54ba))
+
+- **fusion**: Gear-train calculator palette UI (form + results table)
+  ([`35f8550`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/35f8550a93b6abfb2c38414c2621c8ba21e5f964))
+
+- **fusion**: Move gear-train calculator to Utilities > Add-Ins, pinned
+  ([`fdf76e8`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/fdf76e86ee2aa60d24e63927ca045a45f3464cd9))
+
+- **fusion**: Preview pitch diameters and center distance in the generator dialog
+  ([`74df290`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/74df2906ee3dab20e828a368abebf08d5736149a))
+
+- **fusion**: Register the gear-train calculator command
+  ([`326fda5`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/326fda5da5772468c30e71b5a6bdd97ba8f33c03))
+
+### Performance Improvements
+
+- **engine**: Bound gear-train search (dedup, cap-aware loop, safety valves)
+  ([`a9b94df`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/a9b94dfb85610245a12d52ac4126ada758402ea1))
+
+### Testing
+
+- **engine**: Brute-force equivalence guard for pruned search
+  ([`d364f8a`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/d364f8a4c2b8ab1d571beb2dc85458e29be2de7c))
+
+
 ## v1.8.0 (2026-06-29)
 
 ### Chores
