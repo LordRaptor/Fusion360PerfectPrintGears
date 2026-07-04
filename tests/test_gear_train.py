@@ -201,3 +201,38 @@ def test_direction_opposite_keeps_only_odd_stage_counts():
     assert res.trains
     assert all(len(t.stages) % 2 == 1 for t in res.trains)
     assert all(t.direction() == -1 for t in res.trains)
+
+
+def test_coaxial_all_stages_share_tooth_sum():
+    q = _valid_query(target_num=12, target_den=1, min_stages=2, max_stages=2,
+                     teeth_min=6, teeth_max=90, coaxial=True)
+    res = gt.search(q)
+    assert res.trains, 'expected coaxial solutions'
+    for t in res.trains:
+        sums = {s.tooth_sum() for s in t.stages}
+        assert len(sums) == 1, 'every coaxial stage must share one tooth sum'
+
+
+def test_coaxial_finds_the_canonical_4832_train():
+    # (48/12) * (45/15) = 4 * 3 = 12, with 48+12 == 45+15 == 60.
+    q = _valid_query(target_num=12, target_den=1, min_stages=2, max_stages=2,
+                     teeth_min=6, teeth_max=90, coaxial=True)
+    res = gt.search(q)
+    ms = {tuple(sorted((s.driving, s.driven) for s in t.stages)) for t in res.trains}
+    assert tuple(sorted([(48, 12), (45, 15)])) in ms
+
+
+def test_coaxial_min_stage_one_is_raised_to_two():
+    q = _valid_query(target_num=12, target_den=1, min_stages=1, max_stages=2,
+                     teeth_min=6, teeth_max=90, coaxial=True)
+    res = gt.search(q)
+    assert res.trains
+    assert all(len(t.stages) >= 2 for t in res.trains)
+    assert any('2 stages' in w or 'coaxial' in w.lower() for w in res.warnings)
+
+
+def test_coaxial_trains_are_still_exact():
+    q = _valid_query(target_num=12, target_den=1, min_stages=2, max_stages=2,
+                     teeth_min=6, teeth_max=90, coaxial=True)
+    res = gt.search(q)
+    assert all(t.ratio() == Fraction(12, 1) for t in res.trains)

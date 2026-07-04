@@ -96,6 +96,9 @@ def normalize(q: TrainQuery):
 
 def _generate(q: TrainQuery, n: int) -> list:
     """All exact `n`-stage trains over [teeth_min, teeth_max], both directions.
+    When q.coaxial is set, the first stage fixes the tooth sum S and every later stage
+    must satisfy driving + driven == S (equal center distance at one module).
+
     Raw list -- may contain reorderings/duplicates; dedup/order happens in search().
 
     Recursion: `remaining` is the product the not-yet-placed stages must still equal.
@@ -109,7 +112,7 @@ def _generate(q: TrainQuery, n: int) -> list:
     L, H = q.teeth_min, q.teeth_max
     target = Fraction(q.target_num, q.target_den)
 
-    def recurse(remaining: Fraction, k: int, stages: tuple):
+    def recurse(remaining: Fraction, k: int, stages: tuple, coax_sum):
         if k == 0:
             if remaining == 1:
                 out.append(GearTrain(stages))
@@ -122,9 +125,14 @@ def _generate(q: TrainQuery, n: int) -> list:
             b_lo = max(L, math.ceil(a * lo / remaining))
             b_hi = min(H, math.floor(a * hi / remaining))
             for b in range(b_lo, b_hi + 1):
-                recurse(remaining * Fraction(b, a), k - 1, stages + (Stage(a, b),))
+                if coax_sum is not None and a + b != coax_sum:
+                    continue
+                # First stage of a coaxial search fixes the shared sum for the rest.
+                next_sum = coax_sum if coax_sum is not None else (a + b if q.coaxial else None)
+                recurse(remaining * Fraction(b, a), k - 1,
+                        stages + (Stage(a, b),), next_sum)
 
-    recurse(target, n, ())
+    recurse(target, n, (), None)
     return out
 
 
