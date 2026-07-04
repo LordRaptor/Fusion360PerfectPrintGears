@@ -113,6 +113,11 @@ def _build_inputs(inputs):
     rinfo = inputs.addTextBoxCommandInput('ratioInfo', 'Gear ratio', '', 1, True)
     rinfo.isFullWidth = False
 
+    futil.log('build: dimInfo')
+    # Read-only pitch-diameter / center-distance preview (from teeth + module).
+    dinfo = inputs.addTextBoxCommandInput('dimInfo', 'Sizes', '', 3, True)
+    dinfo.isFullWidth = True
+
     futil.log('build: toothSizing group')
     tsz = inputs.addGroupCommandInput('toothSizing', 'Tooth sizing')
     tsz.isExpanded = True
@@ -159,6 +164,7 @@ def _build_inputs(inputs):
 
     futil.log('build: ratio display')
     _update_ratio_display(inputs)
+    _update_dimensions_display(inputs)
     futil.log('build: inputs done')
 
 
@@ -195,6 +201,18 @@ def _update_ratio_display(inputs):
         pass
 
 
+def _update_dimensions_display(inputs):
+    """Recompute the pitch-diameter / center-distance readout from tooth counts + module.
+    Depends only on teeth and module, so refresh it when either changes."""
+    try:
+        wt = inputs.itemById('drivingTeeth').value
+        pt = inputs.itemById('drivenTeeth').value
+        module_mm = _tooth_inputs(inputs).itemById('module').value / 0.1   # cm -> mm
+        inputs.itemById('dimInfo').text = gear_math.format_dimensions(wt, pt, module_mm)
+    except Exception:
+        pass
+
+
 def command_input_changed(args: adsk.core.InputChangedEventArgs):
     global _linking
     if _linking:
@@ -210,8 +228,10 @@ def command_input_changed(args: adsk.core.InputChangedEventArgs):
             _relink_tooth_sizing(inputs, changed.id)
         finally:
             _linking = False
+        _update_dimensions_display(inputs)   # module may have changed -> pitch Ø / center
     elif changed.id in ('drivingTeeth', 'drivenTeeth'):
         _update_ratio_display(inputs)
+        _update_dimensions_display(inputs)
     elif changed.id == 'clearanceMode':
         is_pct = inputs.itemById('clearanceMode').selectedItem.name == 'Percent'
         inputs.itemById('clearance').isVisible = not is_pct

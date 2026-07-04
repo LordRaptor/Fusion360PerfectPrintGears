@@ -415,6 +415,20 @@ def test_format_ratio_equal_counts_is_one_to_one():
     assert gm.format_ratio(20, 20) == "1 : 1"
 
 
+def test_format_dimensions_pitch_and_center():
+    # module 2.0, 20/40 teeth -> pitch Ø 40 / 80 mm, center (40+80)/2 = 60 mm
+    s = gm.format_dimensions(20, 40, 2.0)
+    assert "40.00" in s and "80.00" in s
+    assert "60.00" in s
+    assert "driving" in s and "driven" in s and "Center" in s
+
+
+def test_format_dimensions_fractional_module():
+    # module 1.5, 21/45 teeth -> pitch Ø 31.50 / 67.50 mm, center 49.50 mm
+    s = gm.format_dimensions(21, 45, 1.5)
+    assert "31.50" in s and "67.50" in s and "49.50" in s
+
+
 # ------------------------------------------------------------- earc densify
 def test_earc_densify_traces_axis_aligned_ellipse():
     # right half-ellipse: center (5,0), tangential(major) b=2 along y, radial(minor) a=1 along x
