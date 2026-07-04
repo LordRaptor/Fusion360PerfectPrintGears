@@ -9,6 +9,8 @@ window.fusionJavaScriptHandler = {
       }
     } catch (e) {
       showMessage('Error handling response: ' + e, true);
+    } finally {
+      setBusy(false);   // always clear the busy state, even on a bad payload
     }
     return '';   // required by the Fusion palette contract
   }
@@ -26,12 +28,27 @@ document.getElementById('query').addEventListener('submit', function (evt) {
     direction: document.getElementById('direction').value,
     coaxial: document.getElementById('coaxial').checked
   };
-  showMessage('Searching…', false);
-  // Send to Python -> fires palette.incomingFromHTML with action 'search'.
-  adsk.fusionSendData('search', JSON.stringify(query));
+  setBusy(true);
+  // adsk.fusionSendData is SYNCHRONOUS -- it blocks this thread until the Python search
+  // returns, freezing the palette. Defer it past two animation frames so the browser
+  // actually paints the busy state (spinner + "Searching…") before the freeze.
+  window.requestAnimationFrame(function () {
+    window.requestAnimationFrame(function () {
+      // Fires palette.incomingFromHTML with action 'search'.
+      adsk.fusionSendData('search', JSON.stringify(query));
+    });
+  });
 });
 
 function intVal(id) { return parseInt(document.getElementById(id).value, 10); }
+
+function setBusy(busy) {
+  var btn = document.getElementById('search');
+  btn.disabled = busy;
+  btn.textContent = busy ? 'Searching…' : 'Search';
+  document.getElementById('spinner').hidden = !busy;
+  if (busy) { showMessage('Searching…', false); }
+}
 
 function showMessage(text, isError) {
   var box = document.getElementById('messages');

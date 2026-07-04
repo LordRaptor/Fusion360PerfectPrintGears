@@ -32,8 +32,8 @@
       <legend>Options</legend>
       <label>Rotation
         <select id="direction">
+          <option value="same" selected>Same as input</option>
           <option value="any">Any</option>
-          <option value="same">Same as input</option>
           <option value="opposite">Opposite to input</option>
         </select>
       </label>
@@ -41,6 +41,7 @@
     </fieldset>
 
     <button type="submit" id="search">Search</button>
+    <span id="spinner" class="spinner" hidden aria-hidden="true"></span>
   </form>
 
   <div id="messages"></div>
