@@ -46,7 +46,8 @@ pair is unique** and must be generated together for its mating partner.
 2. In Fusion 360: **Utilities → Add-Ins → Scripts and Add-Ins**.
 3. On the **Add-Ins** tab, click the green **+**, select this folder, and **Run**
    (tick *Run on Startup* if you want it loaded automatically).
-4. The command appears under **Solid → Create → Generate Perfect Print Gears**.
+4. Two commands appear under **Solid → Create**: **Generate Perfect Print Gears** and the
+   **Gear Train Calculator** palette.
 
 ---
 
@@ -76,6 +77,33 @@ message.
 ### The two kinds of play
 - **Tooth fraction → circumferential backlash** (flank-to-flank): `backlash = CP · (1 − 2 · fraction)`.
 - **Clearance → radial clearance** (tip-to-root bottoming).
+
+---
+
+## Gear Train Calculator
+
+A second command adds a non-modal **Palette** (SOLID workspace → CREATE panel → *Gear Train
+Calculator*) that searches for **compound clock gear trains** hitting an **exact** target
+ratio. It is a pure calculator — it creates no geometry.
+
+Enter a target ratio as `P : Q` (any positive rational), a stage-count range, and a single
+tooth-count range that every gear draws from. Each stage is one driving/driven mesh and may
+step the speed up or down, so the search covers both directions. Options:
+
+- **Rotation** — filter to trains whose output turns the *same* as, or *opposite* to, the
+  input (this is a stage-count parity filter, independent of speed).
+- **Coaxial input/output** — require the input and output to share one shaft. This forces
+  every stage to share one tooth sum (equal center distance at one module) and at least two
+  stages.
+
+Results list each train's stages (`driving ÷ driven`), the exact achieved ratio, gear count,
+rotation direction, and per-stage tooth sum. Following Steve Peterson's convention, the tooth
+sum (∝ center distance) helps you judge gear sizes when picking a solution. Results are exact
+by construction and ordered fewest-stages-then-most-compact, capped at 200. Gear-train ratio
+search is combinatorially large, so for loose targets over wide ranges the search is bounded
+for responsiveness and returns a **partial** list (flagged in the palette) — narrow the tooth
+range or stage count for a complete result. You read a result and set up the gears yourself
+(e.g. with the generator command).
 
 ---
 
@@ -127,10 +155,12 @@ cannot be driven headless; it is verified by loading the add-in in Fusion.
 | Path | Responsibility |
 |---|---|
 | `core/gear_math.py` | Pure conjugation engine — no `adsk` import. |
+| `core/gear_train.py` | Pure gear-train search engine (exact ratios) — no `adsk` import. |
 | `core/sketch_builder.py` | Renders engine output into Fusion sketches, then extrudes + patterns them into solids. |
 | `core/settings.py` | Pure (de)serialization of dialog settings. |
-| `commands/generateGears/entry.py` | Command, dialog, validation, persistence. |
-| `tests/` | pytest for the engine, settings, and interference guard. |
+| `commands/generateGears/entry.py` | Gear generator: command, dialog, validation, persistence. |
+| `commands/calcGearTrain/entry.py` | Gear train calculator: palette launcher + engine bridge. |
+| `tests/` | pytest for the engines, settings, and interference guard. |
 
 ---
 
