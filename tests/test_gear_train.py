@@ -287,3 +287,35 @@ def test_pruned_search_matches_brute_force_coaxial():
     q = _valid_query(target_num=6, target_den=1, min_stages=2, max_stages=2,
                      teeth_min=6, teeth_max=24, coaxial=True)
     assert _search_keys(q) == _brute_force_keys(q)
+
+
+import json
+
+
+def test_result_to_dict_shape_is_json_serializable():
+    res = gt.search(_valid_query(target_num=12, target_den=1, min_stages=2, max_stages=2,
+                                 teeth_min=6, teeth_max=60))
+    d = gt.result_to_dict(res)
+    # Round-trips through JSON (no Fraction/tuple leaking through).
+    d2 = json.loads(json.dumps(d))
+    assert set(d2) == {'trains', 'truncated', 'warnings', 'error'}
+    assert isinstance(d2['trains'], list) and d2['trains']
+    row = d2['trains'][0]
+    assert set(row) == {'stages', 'ratio', 'ratio_decimal', 'num_gears',
+                        'total_teeth', 'direction', 'coaxial_sum'}
+    assert row['stages'][0].keys() >= {'driving', 'driven', 'tooth_sum'}
+    assert ' : ' in row['ratio']            # e.g. "12 : 1"
+    assert row['direction'] in ('same', 'opposite')
+
+
+def test_result_to_dict_flags_coaxial_sum():
+    res = gt.search(_valid_query(target_num=12, target_den=1, min_stages=2, max_stages=2,
+                                 teeth_min=6, teeth_max=90, coaxial=True))
+    d = gt.result_to_dict(res)
+    assert all(isinstance(r['coaxial_sum'], int) for r in d['trains'])
+
+
+def test_result_to_dict_carries_error():
+    d = gt.result_to_dict(gt.search(_valid_query(target_num=0)))
+    assert d['error'] is not None
+    assert d['trains'] == []

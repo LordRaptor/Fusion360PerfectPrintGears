@@ -178,3 +178,31 @@ def search(q: TrainQuery) -> SearchResult:
         trains = trains[:MAX_RESULTS]
     return SearchResult(trains=trains, truncated=truncated,
                         warnings=tuple(warnings), error=None)
+
+
+def _is_coaxial(train: GearTrain) -> bool:
+    return len(train.stages) >= 2 and len({s.tooth_sum() for s in train.stages}) == 1
+
+
+def _train_to_dict(train: GearTrain) -> dict:
+    r = train.ratio()
+    return {
+        'stages': [{'driving': s.driving, 'driven': s.driven, 'tooth_sum': s.tooth_sum()}
+                   for s in train.stages],
+        'ratio': f'{r.numerator} : {r.denominator}',
+        'ratio_decimal': float(r),
+        'num_gears': train.num_gears(),
+        'total_teeth': train.total_teeth(),
+        'direction': 'same' if train.direction() == 1 else 'opposite',
+        'coaxial_sum': train.stages[0].tooth_sum() if _is_coaxial(train) else None,
+    }
+
+
+def result_to_dict(result: SearchResult) -> dict:
+    """JSON-ready dict matching the Palette message protocol."""
+    return {
+        'trains': [_train_to_dict(t) for t in result.trains],
+        'truncated': result.truncated,
+        'warnings': list(result.warnings),
+        'error': result.error,
+    }
