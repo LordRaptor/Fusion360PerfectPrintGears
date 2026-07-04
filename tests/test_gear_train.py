@@ -319,3 +319,44 @@ def test_result_to_dict_carries_error():
     d = gt.result_to_dict(gt.search(_valid_query(target_num=0)))
     assert d['error'] is not None
     assert d['trains'] == []
+
+
+# --- Task 15: performance redesign of _generate ---------------------------------
+import time
+
+
+def test_generate_produces_each_multiset_once():
+    # Canonical (non-decreasing) stage ordering: no more n! reorderings in the raw list.
+    q = _valid_query(target_num=12, target_den=1, teeth_min=6, teeth_max=60)
+    trains = gt._generate(q, 2)
+    keys = [tuple(sorted((s.driving, s.driven) for s in t.stages)) for t in trains]
+    assert len(keys) == len(set(keys)), 'each stage multiset must appear exactly once'
+
+
+def test_search_loose_high_stage_target_terminates_fast():
+    # The motivating blowup: 2:1 over teeth 6..60 forced to exactly 3 stages. Must finish
+    # quickly (safety valve) instead of running for >100s, and report truncation.
+    q = _valid_query(target_num=2, target_den=1, min_stages=3, max_stages=3,
+                     teeth_min=6, teeth_max=60)
+    t0 = time.perf_counter()
+    res = gt.search(q)
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 20.0, f'search took {elapsed:.1f}s -- safety valve not engaging'
+    assert res.error is None
+    assert len(res.trains) == gt.MAX_RESULTS
+    assert res.truncated is True
+    assert all(t.ratio() == Fraction(2, 1) for t in res.trains)
+
+
+def test_search_palette_default_query_is_fast():
+    # The palette's first-use default (target 12:1, stages 1..3, teeth 8..90) must not hang.
+    # The cap-aware stage loop fills the cap at n=2 and never reaches the n=3 blowup.
+    q = _valid_query(target_num=12, target_den=1, min_stages=1, max_stages=3,
+                     teeth_min=8, teeth_max=90)
+    t0 = time.perf_counter()
+    res = gt.search(q)
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 20.0, f'default query took {elapsed:.1f}s'
+    assert res.error is None
+    assert len(res.trains) == gt.MAX_RESULTS
+    assert res.truncated is True

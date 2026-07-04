@@ -13,6 +13,10 @@ from fractions import Fraction
 
 MAX_RESULTS = 200          # hard cap on returned trains; truncation is reported, never silent
 MIN_TEETH_WARN = 6         # cycloidal pinions below this are hard to print/cut (warning only)
+GENERATE_LIMIT = 20000     # safety valve: max trains materialized per stage level (see _generate)
+WORK_BUDGET = 600_000      # safety valve: max stage placements explored per level (~4s worst
+                           #   case; loose targets forced to high stage counts return partial,
+                           #   truncation-flagged results rather than hanging -- narrow ranges)
 
 
 @dataclass(frozen=True)
@@ -94,46 +98,86 @@ def normalize(q: TrainQuery):
     return replace(q, min_stages=min_stages), warnings
 
 
-def _generate(q: TrainQuery, n: int) -> list:
-    """All exact `n`-stage trains over [teeth_min, teeth_max], both directions.
+def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
+    """Enumerate exact `n`-stage trains; return (trains, truncated).
+
+    All exact `n`-stage trains over [teeth_min, teeth_max], both directions.
     When q.coaxial is set, the first stage fixes the tooth sum S and every later stage
     must satisfy driving + driven == S (equal center distance at one module).
 
-    Raw list -- may contain reorderings/duplicates; dedup/order happens in search().
+    Stages are placed in canonical non-decreasing (driving, driven) order, so each stage
+    multiset is emitted exactly once -- no n! reorderings (the raw list is already
+    duplicate-free). `search()` still dedups across stage counts as a backstop.
 
     Recursion: `remaining` is the product the not-yet-placed stages must still equal.
     Placing stage (a, b) consumes a factor, leaving remaining * b / a for the rest.
     Prune: after placing a stage, k-1 remain, so the child's remaining must lie in
     [(L/H)^(k-1), (H/L)^(k-1)]. Solving that for b bounds the inner loop to a slice of
     the range instead of the whole range (and collapses the final stage to exact
-    divisors). Accept a leaf iff remaining == 1.
+    divisors). Accept a leaf iff remaining == 1. A coaxial stage after the first has its
+    sum fixed, so b = S - a is a single value, not a loop.
+
+    Safety valves (both report truncation via search() when they trip): `limit` caps the
+    number of trains materialized (memory); `work_budget` caps stage placements explored
+    (time). Gear-train search is NP-hard in general and loose targets over wide ranges
+    have astronomically many exact solutions; since search() only keeps MAX_RESULTS,
+    there is no point exploring further. The known-better algorithm for the overlapping
+    subproblems is DP/memoization on the remaining-ratio state, but with a small result
+    cap the bounded DFS is sufficient.
     """
     out = []
     L, H = q.teeth_min, q.teeth_max
     target = Fraction(q.target_num, q.target_den)
+    work = [0]                           # stage placements explored; bounded by work_budget
 
-    def recurse(remaining: Fraction, k: int, stages: tuple, coax_sum):
+    def stop() -> bool:
+        return ((limit is not None and len(out) >= limit) or
+                (work_budget is not None and work[0] >= work_budget))
+
+    def recurse(remaining: Fraction, k: int, stages: tuple, coax_sum, prev):
+        if stop():
+            return
         if k == 0:
             if remaining == 1:
                 out.append(GearTrain(stages))
             return
         lo = Fraction(L, H) ** (k - 1)   # child ratio-range lower bound
         hi = Fraction(H, L) ** (k - 1)   # child ratio-range upper bound
-        for a in range(L, H + 1):
+        pa, pb = prev                    # last placed stage; enforce (a, b) >= (pa, pb)
+        for a in range(max(L, pa), H + 1):
+            work[0] += 1                 # count the per-a slice computation (bounds time)
             # child remaining = remaining * b / a must be in [lo, hi]  =>
             #   b in [ a*lo/remaining , a*hi/remaining ]
             b_lo = max(L, math.ceil(a * lo / remaining))
             b_hi = min(H, math.floor(a * hi / remaining))
-            for b in range(b_lo, b_hi + 1):
-                if coax_sum is not None and a + b != coax_sum:
-                    continue
-                # First stage of a coaxial search fixes the shared sum for the rest.
-                next_sum = coax_sum if coax_sum is not None else (a + b if q.coaxial else None)
-                recurse(remaining * Fraction(b, a), k - 1,
-                        stages + (Stage(a, b),), next_sum)
+            if a == pa:                  # non-decreasing order: same driving -> driven >= pb
+                b_lo = max(b_lo, pb)
+            if coax_sum is not None:
+                # Coaxial stage after the first: b is forced to coax_sum - a. Test the
+                # single candidate instead of scanning (and rejecting) the whole slice.
+                b = coax_sum - a
+                if b_lo <= b <= b_hi:
+                    recurse(remaining * Fraction(b, a), k - 1,
+                            stages + (Stage(a, b),), coax_sum, (a, b))
+            else:
+                for b in range(b_lo, b_hi + 1):
+                    work[0] += 1
+                    # The first stage of a coaxial search fixes the shared sum S.
+                    next_sum = a + b if q.coaxial else None
+                    recurse(remaining * Fraction(b, a), k - 1,
+                            stages + (Stage(a, b),), next_sum, (a, b))
+            if stop():
+                return
 
-    recurse(target, n, (), None)
-    return out
+    recurse(target, n, (), None, (0, 0))
+    truncated = ((limit is not None and len(out) >= limit) or
+                 (work_budget is not None and work[0] >= work_budget))
+    return out, truncated
+
+
+def _generate(q: TrainQuery, n: int, limit=None, work_budget=None) -> list:
+    """Backward-compatible wrapper returning just the train list (see `_enumerate`)."""
+    return _enumerate(q, n, limit=limit, work_budget=work_budget)[0]
 
 
 @dataclass(frozen=True)
@@ -162,19 +206,30 @@ def search(q: TrainQuery) -> SearchResult:
 
     q, warnings = normalize(q)
     seen = {}
+    truncated = False
     for n in range(q.min_stages, q.max_stages + 1):
         if q.direction == 'same' and n % 2 != 0:
             continue
         if q.direction == 'opposite' and n % 2 == 0:
             continue
-        for train in _generate(q, n):
+        level, level_truncated = _enumerate(q, n, limit=GENERATE_LIMIT,
+                                             work_budget=WORK_BUDGET)
+        if level_truncated:
+            truncated = True          # a safety valve tripped -> this level was cut short
+        for train in level:
             key = _canonical(train)
             if key not in seen:
                 seen[key] = train
+        if len(seen) >= MAX_RESULTS:
+            # Results sort by (num_stages, ...), so every higher-stage-count train sorts
+            # strictly after these -- it can never enter the top MAX_RESULTS. Stop
+            # climbing; more solutions may exist at higher stage counts, so flag truncation.
+            truncated = True
+            break
 
     trains = sorted(seen.values(), key=_sort_key)
-    truncated = len(trains) > MAX_RESULTS
-    if truncated:
+    if len(trains) > MAX_RESULTS:
+        truncated = True
         trains = trains[:MAX_RESULTS]
     return SearchResult(trains=trains, truncated=truncated,
                         warnings=tuple(warnings), error=None)
