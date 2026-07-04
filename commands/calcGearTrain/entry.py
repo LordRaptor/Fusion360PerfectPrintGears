@@ -19,8 +19,10 @@ ICON_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'resource
 
 PALETTE_ID = f'{config.COMPANY_NAME}_{config.ADDIN_NAME}_gearTrainPalette'
 PALETTE_NAME = 'Gear Train Calculator'
-# htmlFileURL: a full local path to the palette HTML (Qt web browser).
-PALETTE_URL = os.path.join(ICON_FOLDER, 'palette.html')
+# htmlFileURL: a local path to the palette HTML (Qt web browser). MUST use forward
+# slashes -- Fusion prepends file:/// and URL-encodes the path, and Windows backslashes
+# would become %5C, giving ERR_INVALID_URL.
+PALETTE_URL = os.path.join(ICON_FOLDER, 'palette.html').replace('\\', '/')
 
 local_handlers = []
 
