@@ -236,3 +236,54 @@ def test_coaxial_trains_are_still_exact():
                      teeth_min=6, teeth_max=90, coaxial=True)
     res = gt.search(q)
     assert all(t.ratio() == Fraction(12, 1) for t in res.trains)
+
+
+import itertools
+
+
+def _brute_force_keys(q):
+    """Obvious O(range^(2n)) reference: enumerate every stage combination, keep exact
+    matches (respecting direction parity + coaxial), return their canonical keys."""
+    L, H = q.teeth_min, q.teeth_max
+    target = Fraction(q.target_num, q.target_den)
+    all_stages = [gt.Stage(a, b)
+                  for a in range(L, H + 1) for b in range(L, H + 1)]
+    keys = set()
+    qn, _ = gt.normalize(q)
+    for n in range(qn.min_stages, qn.max_stages + 1):
+        if qn.direction == 'same' and n % 2 != 0:
+            continue
+        if qn.direction == 'opposite' and n % 2 == 0:
+            continue
+        for combo in itertools.product(all_stages, repeat=n):
+            if qn.coaxial and len({s.tooth_sum() for s in combo}) != 1:
+                continue
+            prod = Fraction(1)
+            for s in combo:
+                prod *= s.ratio()
+            if prod == target:
+                keys.add(tuple(sorted((s.driving, s.driven) for s in combo)))
+    return keys
+
+
+def _search_keys(q):
+    return {tuple(sorted((s.driving, s.driven) for s in t.stages))
+            for t in gt.search(q).trains}
+
+
+def test_pruned_search_matches_brute_force_small():
+    q = _valid_query(target_num=12, target_den=1, min_stages=1, max_stages=2,
+                     teeth_min=6, teeth_max=24)
+    assert _search_keys(q) == _brute_force_keys(q)
+
+
+def test_pruned_search_matches_brute_force_reduction():
+    q = _valid_query(target_num=1, target_den=6, min_stages=1, max_stages=2,
+                     teeth_min=6, teeth_max=24)
+    assert _search_keys(q) == _brute_force_keys(q)
+
+
+def test_pruned_search_matches_brute_force_coaxial():
+    q = _valid_query(target_num=6, target_den=1, min_stages=2, max_stages=2,
+                     teeth_min=6, teeth_max=24, coaxial=True)
+    assert _search_keys(q) == _brute_force_keys(q)
