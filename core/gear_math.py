@@ -113,6 +113,17 @@ def format_ratio(driving_teeth: int, driven_teeth: int) -> str:
     return f"{a} : {b} ({word})"
 
 
+def format_dimensions(driving_teeth: int, driven_teeth: int, module_mm: float) -> str:
+    """Layout preview: pitch diameters and center distance (all mm), from the tooth
+    counts and module only (pitch Ø = module * teeth; center = (Ø_driving + Ø_driven)/2).
+    Independent of tooth width / clearance. Two lines for the dialog readout."""
+    dia_driving = module_mm * driving_teeth
+    dia_driven = module_mm * driven_teeth
+    center = (dia_driving + dia_driven) / 2.0
+    return (f"Pitch Ø: driving {dia_driving:.2f} mm, driven {dia_driven:.2f} mm\n"
+            f"Center distance: {center:.2f} mm")
+
+
 # ===================================================================== 2D math
 def rotate_point(p: Point, center: Point, angle: float) -> Point:
     s, c = math.sin(angle), math.cos(angle)

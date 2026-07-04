@@ -14,9 +14,10 @@ def run(context):
         if not context['IsApplicationStartup']:
             app = adsk.core.Application.get()
             app.userInterface.messageBox(
-                'The Perfect Print Gears add-in has loaded and added a '
-                '"Generate Perfect Print Gears" command to the CREATE panel in the '
-                'SOLID tab of the DESIGN workspace.\n\n'
+                'The Perfect Print Gears add-in has loaded and added two commands to '
+                'the DESIGN workspace:\n\n'
+                '• "Generate Perfect Print Gears" — SOLID tab › CREATE panel.\n'
+                '• "Gear Train Calculator" — UTILITIES tab › ADD-INS panel.\n\n'
                 'Debug log: ' + futil.LOG_FILE,
                 'Perfect Print Gears')
 

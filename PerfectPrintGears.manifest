@@ -3,7 +3,7 @@
     "type": "addin",
     "author": "Christopher Schank",
     "description": {
-        "": "Generates matched Perfect Print driving + driven gears as solid bodies (reductions, step-ups, or 1:1, any tooth counts >= 6); the driven gear has an elliptical Perfect-Print tip (lower tip interference/friction) and is left free to swing about the driving gear so you can align it with existing features"
+        "": "Generates matched Perfect Print driving + driven gears as solid bodies (reductions, step-ups, or 1:1, any tooth counts >= 6); the driven gear has an elliptical Perfect-Print tip (lower tip interference/friction) and is left free to swing about the driving gear so you can align it with existing features. Also includes a Gear Train Calculator palette that searches for compound clock gear trains hitting an exact target ratio (display-only; creates no geometry). The Perfect Print gear design is the work of Steve Peterson (https://www.stevesclocks.com), documented in his Clock Design Guidelines (https://www.myminifactory.com/object/3d-print-clock-design-guidelines-pdf-714119); this add-in is an independent implementation of that method."
     },
     "version": "1.8.0",
     "runOnStartup": false,

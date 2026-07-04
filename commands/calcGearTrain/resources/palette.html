@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Gear Train Calculator</title>
+  <link rel="stylesheet" href="palette.css">
+</head>
+<body>
+  <h1>Gear Train Calculator</h1>
+  <p class="hint">Find compound trains whose stage ratios multiply to an exact target.</p>
+
+  <form id="query">
+    <fieldset>
+      <legend>Target ratio (P : Q)</legend>
+      <input type="number" id="target_num" min="1" value="12" aria-label="P"> :
+      <input type="number" id="target_den" min="1" value="1" aria-label="Q">
+    </fieldset>
+
+    <fieldset>
+      <legend>Stages</legend>
+      <label>min <input type="number" id="min_stages" min="1" value="1"></label>
+      <label>max <input type="number" id="max_stages" min="1" value="3"></label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Tooth count (all gears)</legend>
+      <label>min <input type="number" id="teeth_min" min="1" value="8"></label>
+      <label>max <input type="number" id="teeth_max" min="1" value="90"></label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Options</legend>
+      <label>Rotation
+        <select id="direction">
+          <option value="same" selected>Same as input</option>
+          <option value="any">Any</option>
+          <option value="opposite">Opposite to input</option>
+        </select>
+      </label>
+      <label><input type="checkbox" id="coaxial"> Coaxial input/output</label>
+    </fieldset>
+
+    <button type="submit" id="search">Search</button>
+    <span id="spinner" class="spinner" hidden aria-hidden="true"></span>
+  </form>
+
+  <div id="messages"></div>
+  <table id="results" hidden>
+    <thead>
+      <tr>
+        <th>#</th><th>Stages (driving &divide; driven)</th><th>Ratio</th>
+        <th>Gears</th><th>Direction</th><th>Tooth sum</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script src="palette.js"></script>
+</body>
+</html>
