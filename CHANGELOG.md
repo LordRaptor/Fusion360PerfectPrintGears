@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.9.1 (2026-07-16)
+
+### Bug Fixes
+
+- **fusion**: Label gear-train calculator ratio as input : output
+  ([`6f0ac92`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/6f0ac92a4c80b775a323e5ef14e7315f90f1c57a))
+
+
 ## v1.9.0 (2026-07-04)
 
 ### Bug Fixes
