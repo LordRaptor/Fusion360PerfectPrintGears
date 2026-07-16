@@ -78,6 +78,11 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
         futil.handle_error('command_created', show_message_box=True)
 
 
+def _opt_int(v):
+    """Palette sends an end-gear bound only when its checkbox is on; absent -> None."""
+    return int(v) if v is not None else None
+
+
 def palette_incoming(args: adsk.core.HTMLEventArgs):
     """Handle the 'search' message from the palette: parse the query, run the pure
     engine, and push results (or an error) back to the HTML."""
@@ -94,6 +99,10 @@ def palette_incoming(args: adsk.core.HTMLEventArgs):
             teeth_max=int(data['teeth_max']),
             direction=str(data.get('direction', 'any')),
             coaxial=bool(data.get('coaxial', False)),
+            input_min=_opt_int(data.get('input_min')),
+            input_max=_opt_int(data.get('input_max')),
+            output_min=_opt_int(data.get('output_min')),
+            output_max=_opt_int(data.get('output_max')),
         )
         payload = json.dumps(gear_train.result_to_dict(gear_train.search(query)))
     except Exception:
