@@ -360,3 +360,27 @@ def test_search_palette_default_query_is_fast():
     assert res.error is None
     assert len(res.trains) == gt.MAX_RESULTS
     assert res.truncated is True
+
+
+def test_validate_accepts_end_gear_bounds_within_range():
+    assert gt.validate(_valid_query(input_min=8, input_max=20,
+                                    output_min=60, output_max=90)) == []
+
+
+def test_validate_rejects_end_gear_bound_outside_general_range():
+    # general range in _valid_query is 6..90
+    assert gt.validate(_valid_query(input_min=8, input_max=120)) != []   # above teeth_max
+    assert gt.validate(_valid_query(output_min=1, output_max=30)) != []  # below teeth_min
+
+
+def test_validate_rejects_half_specified_end_gear_bound():
+    assert gt.validate(_valid_query(input_min=8)) != []      # max missing
+    assert gt.validate(_valid_query(output_max=30)) != []    # min missing
+
+
+def test_validate_rejects_inverted_end_gear_bound():
+    assert gt.validate(_valid_query(input_min=30, input_max=10)) != []
+
+
+def test_validate_no_end_bounds_is_still_clean():
+    assert gt.validate(_valid_query()) == []

@@ -63,6 +63,14 @@ class TrainQuery:
     direction: str = 'any'     # 'same' | 'opposite' | 'any' (rotation sense, not speed)
     coaxial: bool = False      # input & output share one shaft (equal-tooth-sum rule)
 
+    # Optional end-gear bounds (None -> use the general range). Input gear = the first
+    # stage's DRIVING gear; output gear = the last stage's DRIVEN gear. Each must be a
+    # complete pair and a narrowing within [teeth_min, teeth_max]. See validate().
+    input_min: int | None = None
+    input_max: int | None = None
+    output_min: int | None = None
+    output_max: int | None = None
+
 
 def validate(q: TrainQuery) -> list:
     """Return a list of hard-error strings (empty == valid). Small teeth and the
@@ -80,6 +88,18 @@ def validate(q: TrainQuery) -> list:
         errors.append('Maximum stage count must be >= minimum stage count.')
     if q.direction not in ('same', 'opposite', 'any'):
         errors.append("Direction must be 'same', 'opposite', or 'any'.")
+    for name, lo, hi in (('Input', q.input_min, q.input_max),
+                         ('Output', q.output_min, q.output_max)):
+        if lo is None and hi is None:
+            continue
+        if lo is None or hi is None:
+            errors.append(f'{name} gear bound needs both a min and a max (or neither).')
+            continue
+        if hi < lo:
+            errors.append(f'{name} gear max must be >= its min.')
+        if lo < q.teeth_min or hi > q.teeth_max:
+            errors.append(f'{name} gear bound must stay within the general tooth '
+                          f'range ({q.teeth_min}-{q.teeth_max}).')
     return errors
 
 
