@@ -422,3 +422,100 @@ def test_arrange_duplicate_qualifying_stages_pass():
     arranged = gt._arrange_for_ends(stages, 6, 10, 38, 42)
     assert arranged is not None
     assert arranged[0].driving == 8 and arranged[-1].driven == 40
+
+
+def test_search_input_bound_orders_first_stage_driving():
+    q = _valid_query(target_num=12, target_den=1, min_stages=2, max_stages=2,
+                     teeth_min=6, teeth_max=90, input_min=18, input_max=20)
+    res = gt.search(q)
+    assert res.error is None
+    assert res.trains, 'expected trains with an input gear in 18..20'
+    for t in res.trains:
+        assert 18 <= t.stages[0].driving <= 20     # input arbor within bound AND first
+
+
+def test_search_output_bound_orders_last_stage_driven():
+    q = _valid_query(target_num=12, target_den=1, min_stages=2, max_stages=2,
+                     teeth_min=6, teeth_max=90, output_min=6, output_max=8)
+    res = gt.search(q)
+    assert res.trains, 'expected trains with an output gear in 6..8'
+    for t in res.trains:
+        assert 6 <= t.stages[-1].driven <= 8       # output arbor within bound AND last
+
+
+def test_search_bounds_equal_to_general_range_keys_are_a_noop():
+    # Bounds set to the FULL range must not change the result set (by canonical key).
+    base = dict(target_num=12, target_den=1, min_stages=1, max_stages=2,
+                teeth_min=6, teeth_max=24)
+    plain = _search_keys(_valid_query(**base))
+    bounded = _search_keys(_valid_query(input_min=6, input_max=24,
+                                        output_min=6, output_max=24, **base))
+    assert bounded == plain
+
+
+def test_search_no_bounds_keeps_canonical_stage_order():
+    # The disabled (None) path must NOT reorder stages: each train's stored stages stay in
+    # canonical non-decreasing (driving, driven) order. Uses 3 stages so a reorder bug
+    # would actually show (with 2 stages the arranged tuple equals the canonical one).
+    q = _valid_query(target_num=12, target_den=1, min_stages=3, max_stages=3,
+                     teeth_min=6, teeth_max=40)
+    res = gt.search(q)
+    assert res.trains, 'expected 3-stage solutions'
+    for t in res.trains:
+        pairs = [(s.driving, s.driven) for s in t.stages]
+        assert pairs == sorted(pairs), 'no-bounds path must keep canonical order'
+
+
+def _brute_force_keys_bounded(q):
+    """Reference like _brute_force_keys, but also honours the optional end-gear bounds.
+
+    Uses its OWN arrangement check (deliberately NOT gear_train._arrange_for_ends) so this
+    test verifies the pruned enumeration's COMPLETENESS independently of the implementation
+    it is checking. A combo counts iff some ordering puts a driving gear in the input range
+    first and a DIFFERENT driven gear in the output range last (1-stage: one stage does both).
+    """
+    L, H = q.teeth_min, q.teeth_max
+    in_lo = q.input_min if q.input_min is not None else L
+    in_hi = q.input_max if q.input_max is not None else H
+    out_lo = q.output_min if q.output_min is not None else L
+    out_hi = q.output_max if q.output_max is not None else H
+    target = Fraction(q.target_num, q.target_den)
+    all_stages = [gt.Stage(a, b) for a in range(L, H + 1) for b in range(L, H + 1)]
+
+    def admits(combo):
+        in_ok = [k for k, s in enumerate(combo) if in_lo <= s.driving <= in_hi]
+        out_ok = [k for k, s in enumerate(combo) if out_lo <= s.driven <= out_hi]
+        if len(combo) == 1:
+            return bool(in_ok) and bool(out_ok)     # one stage must satisfy both ends
+        return any(i != j for i in in_ok for j in out_ok)
+
+    keys = set()
+    qn, _ = gt.normalize(q)
+    for n in range(qn.min_stages, qn.max_stages + 1):
+        if qn.direction == 'same' and n % 2 != 0:
+            continue
+        if qn.direction == 'opposite' and n % 2 == 0:
+            continue
+        for combo in itertools.product(all_stages, repeat=n):
+            if qn.coaxial and len({s.tooth_sum() for s in combo}) != 1:
+                continue
+            prod = Fraction(1)
+            for s in combo:
+                prod *= s.ratio()
+            if prod != target:
+                continue
+            if admits(combo):
+                keys.add(tuple(sorted((s.driving, s.driven) for s in combo)))
+    return keys
+
+
+def test_pruned_search_matches_brute_force_with_end_bounds():
+    q = _valid_query(target_num=12, target_den=1, min_stages=2, max_stages=2,
+                     teeth_min=6, teeth_max=24, input_min=18, input_max=20)
+    bounded = _search_keys(q)
+    assert bounded, 'expected some qualifying trains'
+    assert bounded == _brute_force_keys_bounded(q)
+    # genuine narrowing: some unbounded trains have every stage's driving > 20
+    open_keys = _search_keys(_valid_query(target_num=12, target_den=1, min_stages=2,
+                                          max_stages=2, teeth_min=6, teeth_max=24))
+    assert bounded < open_keys
