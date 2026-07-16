@@ -31,6 +31,23 @@ document.getElementById('query').addEventListener('submit', function (evt) {
     direction: document.getElementById('direction').value,
     coaxial: document.getElementById('coaxial').checked
   };
+  // End-gear bounds: include only when the checkbox is on, and require both fields then.
+  if (document.getElementById('limit_input').checked) {
+    if (!hasVal('input_min') || !hasVal('input_max')) {
+      showMessage('Enter a min and max for the input gear, or uncheck "Limit input gear".', true);
+      return;
+    }
+    query.input_min = intVal('input_min');
+    query.input_max = intVal('input_max');
+  }
+  if (document.getElementById('limit_output').checked) {
+    if (!hasVal('output_min') || !hasVal('output_max')) {
+      showMessage('Enter a min and max for the output gear, or uncheck "Limit output gear".', true);
+      return;
+    }
+    query.output_min = intVal('output_min');
+    query.output_max = intVal('output_max');
+  }
   setBusy(true);
   // adsk.fusionSendData is SYNCHRONOUS -- it blocks this thread until the Python search
   // returns, freezing the palette. Defer it past two animation frames so the browser
@@ -44,6 +61,32 @@ document.getElementById('query').addEventListener('submit', function (evt) {
 });
 
 function intVal(id) { return parseInt(document.getElementById(id).value, 10); }
+
+function hasVal(id) {
+  var v = document.getElementById(id).value;
+  return v.trim() !== '' && !isNaN(parseInt(v, 10));
+}
+
+// A "Limit X gear" checkbox enables/disables its min/max pair. On enable, pre-fill the
+// pair from the general range as a starting point (the user then narrows it).
+function wireLimit(cbId, minId, maxId) {
+  var cb = document.getElementById(cbId);
+  function sync() {
+    var on = cb.checked;
+    var minEl = document.getElementById(minId);
+    var maxEl = document.getElementById(maxId);
+    minEl.disabled = !on;
+    maxEl.disabled = !on;
+    if (on) {
+      if (minEl.value.trim() === '') { minEl.value = document.getElementById('teeth_min').value; }
+      if (maxEl.value.trim() === '') { maxEl.value = document.getElementById('teeth_max').value; }
+    }
+  }
+  cb.addEventListener('change', sync);
+  sync();   // establish the initial disabled state on load
+}
+wireLimit('limit_input', 'input_min', 'input_max');
+wireLimit('limit_output', 'output_min', 'output_max');
 
 function setBusy(busy) {
   var btn = document.getElementById('search');
