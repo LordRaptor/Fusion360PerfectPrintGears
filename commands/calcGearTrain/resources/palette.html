@@ -30,6 +30,19 @@
     </fieldset>
 
     <fieldset>
+      <legend>End gears (optional)</legend>
+      <p class="hint">Bound the first (input) and last (output) gears separately.
+        When set, each result's stages are ordered input &rarr; output.</p>
+      <label><input type="checkbox" id="limit_input"> Limit input gear</label>
+      <label>min <input type="number" id="input_min" min="1" disabled></label>
+      <label>max <input type="number" id="input_max" min="1" disabled></label>
+      <br>
+      <label><input type="checkbox" id="limit_output"> Limit output gear</label>
+      <label>min <input type="number" id="output_min" min="1" disabled></label>
+      <label>max <input type="number" id="output_max" min="1" disabled></label>
+    </fieldset>
+
+    <fieldset>
       <legend>Options</legend>
       <label>Rotation
         <select id="direction">
