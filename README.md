@@ -89,9 +89,11 @@ A second command adds a non-modal **Palette** (UTILITIES tab → ADD-INS panel �
 Calculator*) that searches for **compound clock gear trains** hitting an **exact** target
 ratio. It is a pure calculator — it creates no geometry.
 
-Enter a target ratio as `P : Q` (any positive rational), a stage-count range, and a single
-tooth-count range that every gear draws from. Each stage is one driving/driven mesh and may
-step the speed up or down, so the search covers both directions. Options:
+Enter a target ratio as `input : output` — turns of the input per turn of the output, any
+positive rational (e.g. `12 : 1` for a minutes-to-hours reduction, where the input turns 12×
+for each output turn) — plus a stage-count range and a single tooth-count range that every
+gear draws from. Each stage is one driving/driven mesh and may step the speed up or down, so
+the search covers both directions. Options:
 
 - **Rotation** — filter to trains whose output turns the *same* as, or *opposite* to, the
   input (this is a stage-count parity filter, independent of speed).
@@ -99,8 +101,9 @@ step the speed up or down, so the search covers both directions. Options:
   every stage to share one tooth sum (equal center distance at one module) and at least two
   stages.
 
-Results list each train's stages (`driving ÷ driven`), the exact achieved ratio, gear count,
-rotation direction, and per-stage tooth sum. Following Steve Peterson's convention, the tooth
+Results list each train's stages (`driving ÷ driven` tooth counts), the exact achieved ratio
+(shown `input : output` to match the target you entered), gear count, rotation direction, and
+per-stage tooth sum. Following Steve Peterson's convention, the tooth
 sum (∝ center distance) helps you judge gear sizes when picking a solution. Results are exact
 by construction and ordered fewest-stages-then-most-compact, capped at 200. Gear-train ratio
 search is combinatorially large, so for loose targets over wide ranges the search is bounded

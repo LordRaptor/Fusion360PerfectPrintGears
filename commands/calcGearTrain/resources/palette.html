@@ -11,9 +11,10 @@
 
   <form id="query">
     <fieldset>
-      <legend>Target ratio (P : Q)</legend>
-      <input type="number" id="target_num" min="1" value="12" aria-label="P"> :
-      <input type="number" id="target_den" min="1" value="1" aria-label="Q">
+      <legend>Target ratio (input : output)</legend>
+      <label>input <input type="number" id="ratio_input" min="1" value="12" aria-label="input turns"></label>
+      :
+      <label>output <input type="number" id="ratio_output" min="1" value="1" aria-label="output turns"></label>
     </fieldset>
 
     <fieldset>
@@ -48,7 +49,7 @@
   <table id="results" hidden>
     <thead>
       <tr>
-        <th>#</th><th>Stages (driving &divide; driven)</th><th>Ratio</th>
+        <th>#</th><th>Stages (driving &divide; driven)</th><th>Ratio (input : output)</th>
         <th>Gears</th><th>Direction</th><th>Tooth sum</th>
       </tr>
     </thead>

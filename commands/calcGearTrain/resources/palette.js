@@ -19,8 +19,11 @@ window.fusionJavaScriptHandler = {
 document.getElementById('query').addEventListener('submit', function (evt) {
   evt.preventDefault();
   var query = {
-    target_num: intVal('target_num'),
-    target_den: intVal('target_den'),
+    // The engine's ratio is driving/driven = output-speed/input-speed, so the target
+    // numerator is the OUTPUT turns and the denominator is the INPUT turns. The dialog
+    // asks in input:output order (the natural clock framing), so map accordingly.
+    target_num: intVal('ratio_output'),
+    target_den: intVal('ratio_input'),
     min_stages: intVal('min_stages'),
     max_stages: intVal('max_stages'),
     teeth_min: intVal('teeth_min'),
@@ -81,8 +84,15 @@ function render(result) {
     var toothSum = (t.coaxial_sum !== null && t.coaxial_sum !== undefined)
       ? String(t.coaxial_sum) + ' (coaxial — use one module)'
       : t.stages.map(function (s) { return s.tooth_sum; }).join(', ');
+    // The engine reports the ratio string as output:input (driving/driven). The UI speaks
+    // input:output, so flip the STRING to match the dialog and the user's mental model
+    // (e.g. "12 turns in : 1 turn out" for a minutes-to-hours reduction). The decimal is
+    // left as the engine's output-per-input value (e.g. 1/12 = 0.0833 — how far the output
+    // advances per single input turn), which reads naturally alongside "12 : 1".
+    var rp = t.ratio.split(' : ');
+    var ratioIO = rp[1] + ' : ' + rp[0];
     var tr = document.createElement('tr');
-    [String(i + 1), stages, t.ratio + '  (' + t.ratio_decimal.toFixed(4) + ')',
+    [String(i + 1), stages, ratioIO + '  (' + t.ratio_decimal.toFixed(4) + ')',
      String(t.num_gears), t.direction, toothSum].forEach(function (cell) {
       var td = document.createElement('td');
       td.textContent = cell;
