@@ -100,6 +100,12 @@ the search covers both directions. Options:
 - **Coaxial input/output** — require the input and output to share one shaft. This forces
   every stage to share one tooth sum (equal center distance at one module) and at least two
   stages.
+- **End gears (optional)** — independently bound the **input gear** (the first stage's
+  driving gear) and/or the **output gear** (the last stage's driven gear) with their own
+  min/max, each a narrowing within the general tooth range. Enable either with its checkbox
+  (both min and max are required when checked). Useful when the end gears sit in tighter
+  spots than the middle gears. When a bound is set, each result's stages are listed in
+  **input → output** order so you can read off which gear is which.
 
 Results list each train's stages (`driving ÷ driven` tooth counts), the exact achieved ratio
 (shown `input : output` to match the target you entered), gear count, rotation direction, and
