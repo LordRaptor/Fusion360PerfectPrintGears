@@ -391,3 +391,34 @@ def test_validate_accepts_end_gear_bounds_at_general_range_boundary():
 def test_validate_explicit_none_end_bounds_is_clean():
     assert gt.validate(_valid_query(input_min=None, input_max=None,
                                     output_min=None, output_max=None)) == []
+
+
+def test_arrange_single_stage_needs_both_ends_on_one_stage():
+    stages = (gt.Stage(8, 40),)
+    # input gear 8 in [6,10] and output gear 40 in [30,50] -> keep
+    assert gt._arrange_for_ends(stages, 6, 10, 30, 50) == stages
+    # output gear 40 not in [50,60] -> no arrangement
+    assert gt._arrange_for_ends(stages, 6, 10, 50, 60) is None
+
+
+def test_arrange_two_stage_orders_input_first_output_last():
+    stages = (gt.Stage(8, 24), gt.Stage(30, 72))
+    arranged = gt._arrange_for_ends(stages, 6, 10, 60, 80)   # input 8, output 72
+    assert arranged is not None
+    assert arranged[0].driving == 8      # input arbor is first
+    assert arranged[-1].driven == 72     # output arbor is last
+
+
+def test_arrange_two_stage_rejects_when_only_one_stage_serves_both_ends():
+    # stage 0 is the ONLY input-qualifier (driving 8 in [6,10]) AND the ONLY
+    # output-qualifier (driven 40 in [38,42]); one stage cannot be both arbors -> None.
+    stages = (gt.Stage(8, 40), gt.Stage(30, 20))
+    assert gt._arrange_for_ends(stages, 6, 10, 38, 42) is None
+
+
+def test_arrange_duplicate_qualifying_stages_pass():
+    # Two identical qualifying stages are distinct POSITIONS, so a valid i != j exists.
+    stages = (gt.Stage(8, 40), gt.Stage(8, 40))
+    arranged = gt._arrange_for_ends(stages, 6, 10, 38, 42)
+    assert arranged is not None
+    assert arranged[0].driving == 8 and arranged[-1].driven == 40

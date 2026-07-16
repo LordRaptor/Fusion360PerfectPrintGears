@@ -118,6 +118,31 @@ def normalize(q: TrainQuery):
     return replace(q, min_stages=min_stages), warnings
 
 
+def _arrange_for_ends(stages, in_lo, in_hi, out_lo, out_hi):
+    """Reorder `stages` (a tuple/sequence of Stage) as input-first ... output-last so the
+    first stage's DRIVING gear lies in [in_lo, in_hi] and the last stage's DRIVEN gear lies
+    in [out_lo, out_hi]. Return the reordered tuple, or None if no such arrangement exists.
+
+    A single stage cannot be both the input arbor and the output arbor, so for >= 2 stages
+    the input and output stages must sit at DIFFERENT positions. Middle stages keep their
+    (canonical) order. Duplicate identical stages are distinct positions, so they qualify.
+    """
+    n = len(stages)
+    if n == 1:
+        s = stages[0]
+        if in_lo <= s.driving <= in_hi and out_lo <= s.driven <= out_hi:
+            return tuple(stages)
+        return None
+    in_idx = [k for k, s in enumerate(stages) if in_lo <= s.driving <= in_hi]
+    out_idx = [k for k, s in enumerate(stages) if out_lo <= s.driven <= out_hi]
+    for i in in_idx:
+        for j in out_idx:
+            if i != j:
+                middle = [stages[k] for k in range(n) if k != i and k != j]
+                return (stages[i],) + tuple(middle) + (stages[j],)
+    return None
+
+
 def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
     """Enumerate exact `n`-stage trains; return (trains, truncated).
 
@@ -147,6 +172,11 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
     """
     out = []
     L, H = q.teeth_min, q.teeth_max
+    in_lo = q.input_min if q.input_min is not None else L
+    in_hi = q.input_max if q.input_max is not None else H
+    out_lo = q.output_min if q.output_min is not None else L
+    out_hi = q.output_max if q.output_max is not None else H
+    bounded = q.input_min is not None or q.output_min is not None
     target = Fraction(q.target_num, q.target_den)
     work = [0]                           # stage placements explored; bounded by work_budget
 
@@ -159,7 +189,12 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
             return
         if k == 0:
             if remaining == 1:
-                out.append(GearTrain(stages))
+                if bounded:
+                    arranged = _arrange_for_ends(stages, in_lo, in_hi, out_lo, out_hi)
+                    if arranged is not None:
+                        out.append(GearTrain(arranged))
+                else:
+                    out.append(GearTrain(stages))
             return
         lo = Fraction(L, H) ** (k - 1)   # child ratio-range lower bound
         hi = Fraction(H, L) ** (k - 1)   # child ratio-range upper bound
