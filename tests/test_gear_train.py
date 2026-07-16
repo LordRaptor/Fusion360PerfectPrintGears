@@ -519,3 +519,14 @@ def test_pruned_search_matches_brute_force_with_end_bounds():
     open_keys = _search_keys(_valid_query(target_num=12, target_den=1, min_stages=2,
                                           max_stages=2, teeth_min=6, teeth_max=24))
     assert bounded < open_keys
+
+
+def test_pruned_search_matches_brute_force_coaxial_with_end_bounds():
+    # Coaxial + an output bound must still match the independent brute-force reference,
+    # and must be non-empty (guards against a vacuous empty==empty pass).
+    q = _valid_query(target_num=6, target_den=1, min_stages=2, max_stages=2,
+                     teeth_min=6, teeth_max=24, coaxial=True,
+                     output_min=6, output_max=12)
+    bounded = _search_keys(q)
+    assert bounded, 'expected non-empty coaxial+bounds result'
+    assert bounded == _brute_force_keys_bounded(q)

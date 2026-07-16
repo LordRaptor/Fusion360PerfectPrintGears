@@ -176,7 +176,11 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
     in_hi = q.input_max if q.input_max is not None else H
     out_lo = q.output_min if q.output_min is not None else L
     out_hi = q.output_max if q.output_max is not None else H
-    bounded = q.input_min is not None or q.output_min is not None
+    # Apply end-gear filtering/ordering if ANY bound field is set. validate() guarantees
+    # complete pairs via search(); keying on all four (not just the mins) also makes a
+    # direct _enumerate() call honour a lone max instead of silently dropping it.
+    bounded = any(v is not None for v in
+                  (q.input_min, q.input_max, q.output_min, q.output_max))
     target = Fraction(q.target_num, q.target_den)
     work = [0]                           # stage placements explored; bounded by work_budget
 
