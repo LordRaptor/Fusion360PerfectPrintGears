@@ -2,6 +2,42 @@
 
 <!-- version list -->
 
+## v1.10.0 (2026-07-16)
+
+### Documentation
+
+- Document optional end-gear bounds in the calculator
+  ([`1e7df65`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/1e7df65bd7c3411344ad5f56cae8008af227f815))
+
+### Features
+
+- **engine**: Add optional end-gear tooth bounds to TrainQuery
+  ([`da6f1e8`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/da6f1e8ab251c728a4b5aee9a1aa565a5fa88af5))
+
+- **engine**: Filter and order trains by end-gear bounds at the leaf
+  ([`45057ea`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/45057ea7527729fc3dc91bd201b49cdff5d3df5b))
+
+- **fusion**: Add End gears fieldset to the calculator palette
+  ([`f95867c`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/f95867c1ea1290c1d8727f50a75f1e08d25c2e98))
+
+- **fusion**: Forward end-gear bounds from the palette to the engine
+  ([`0313bc9`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/0313bc9f56d7749ed958858d9cdbeff3a765f92e))
+
+- **fusion**: Wire end-gear checkboxes, validation, and query in the palette
+  ([`c12d41e`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/c12d41ef319d9f8fa7c86e3256bd2ddc79ad7334))
+
+### Testing
+
+- **engine**: Cover bounded search ordering and brute-force parity
+  ([`913c0ae`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/913c0aebe5172716f3695e3421b9e260360553f4))
+
+- **engine**: Harden bounded gate and add coaxial+bounds parity test
+  ([`2c37c4c`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/2c37c4c1318541274716bed5df7af0fe376993e2))
+
+- **engine**: Tighten end-gear bound validation tests and comment
+  ([`70c2a95`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/70c2a95e0722953a0dca2fbd9444d01a656eb09a))
+
+
 ## v1.9.1 (2026-07-16)
 
 ### Bug Fixes
