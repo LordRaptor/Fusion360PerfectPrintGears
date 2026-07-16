@@ -65,7 +65,7 @@ class TrainQuery:
 
     # Optional end-gear bounds (None -> use the general range). Input gear = the first
     # stage's DRIVING gear; output gear = the last stage's DRIVEN gear. Each must be a
-    # complete pair and a narrowing within [teeth_min, teeth_max]. See validate().
+    # complete pair, within [teeth_min, teeth_max]. See validate().
     input_min: int | None = None
     input_max: int | None = None
     output_min: int | None = None

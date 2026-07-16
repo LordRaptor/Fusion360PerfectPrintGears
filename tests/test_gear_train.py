@@ -382,5 +382,12 @@ def test_validate_rejects_inverted_end_gear_bound():
     assert gt.validate(_valid_query(input_min=30, input_max=10)) != []
 
 
-def test_validate_no_end_bounds_is_still_clean():
-    assert gt.validate(_valid_query()) == []
+def test_validate_accepts_end_gear_bounds_at_general_range_boundary():
+    # Bounds equal to the general-range endpoints are inclusive (valid).
+    assert gt.validate(_valid_query(input_min=6, input_max=90,
+                                    output_min=6, output_max=90)) == []
+
+
+def test_validate_explicit_none_end_bounds_is_clean():
+    assert gt.validate(_valid_query(input_min=None, input_max=None,
+                                    output_min=None, output_max=None)) == []
