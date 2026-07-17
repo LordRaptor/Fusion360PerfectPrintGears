@@ -324,6 +324,20 @@ def test_pruned_search_matches_brute_force_coaxial():
     assert _search_keys(q) == _brute_force_keys(q)
 
 
+def test_direction_filtered_search_excludes_unity_and_matches_reference():
+    # The direction parity gate (in search()) and the 1:1-stage prune (in recurse())
+    # are independent mechanisms; confirm they compose. Target 2:1 over 6-20 has unity
+    # padding available, so the no-unity assertion is meaningful, and both directions
+    # stay well under the result cap (no truncation) so the brute-force equivalence holds.
+    for direction in ('same', 'opposite'):
+        q = _valid_query(target_num=2, target_den=1, min_stages=1, max_stages=2,
+                         teeth_min=6, teeth_max=20, direction=direction)
+        res = gt.search(q)
+        assert res.trains, f'expected non-empty results for direction={direction}'
+        assert not any(_has_unity_stage(t) for t in res.trains)
+        assert _search_keys(q) == _brute_force_keys(q)
+
+
 import json
 
 
