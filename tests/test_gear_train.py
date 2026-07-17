@@ -55,6 +55,18 @@ def test_validate_allows_reduction_target():
     assert gt.validate(_valid_query(target_num=1, target_den=12)) == []
 
 
+def test_validate_rejects_one_to_one_target():
+    errors = gt.validate(_valid_query(target_num=5, target_den=5))
+    assert errors, 'a 1:1 target must be rejected'
+    assert any('1:1' in e for e in errors)
+
+
+def test_search_reports_error_for_one_to_one_target():
+    res = gt.search(_valid_query(target_num=1, target_den=1))
+    assert res.error is not None
+    assert not res.trains
+
+
 def test_validate_rejects_bad_ranges_and_direction():
     assert gt.validate(_valid_query(teeth_max=5)) != []          # teeth_max < teeth_min
     assert gt.validate(_valid_query(max_stages=0)) != []         # max_stages < min_stages
@@ -238,6 +250,28 @@ def test_coaxial_trains_are_still_exact():
     assert all(t.ratio() == Fraction(12, 1) for t in res.trains)
 
 
+def _has_unity_stage(train):
+    return any(s.driving == s.driven for s in train.stages)
+
+
+def test_no_result_contains_a_unity_stage():
+    # 2:1 over 6-24, up to 2 stages: padding stages like (12,12) would otherwise appear.
+    q = _valid_query(target_num=2, target_den=1, min_stages=1, max_stages=2,
+                     teeth_min=6, teeth_max=24)
+    res = gt.search(q)
+    assert res.trains, 'expected non-unity solutions to still exist'
+    assert not any(_has_unity_stage(t) for t in res.trains)
+
+
+def test_no_coaxial_result_contains_a_unity_stage():
+    # Coaxial 2:1: a shared-sum pair like (12,12)+(16,8) (sum 24) would otherwise appear.
+    q = _valid_query(target_num=2, target_den=1, min_stages=2, max_stages=2,
+                     teeth_min=6, teeth_max=24, coaxial=True)
+    res = gt.search(q)
+    assert res.trains, 'expected non-unity coaxial solutions to still exist'
+    assert not any(_has_unity_stage(t) for t in res.trains)
+
+
 import itertools
 
 
@@ -247,7 +281,8 @@ def _brute_force_keys(q):
     L, H = q.teeth_min, q.teeth_max
     target = Fraction(q.target_num, q.target_den)
     all_stages = [gt.Stage(a, b)
-                  for a in range(L, H + 1) for b in range(L, H + 1)]
+                  for a in range(L, H + 1) for b in range(L, H + 1)
+                  if a != b]                       # 1:1 stages are excluded by the solver
     keys = set()
     qn, _ = gt.normalize(q)
     for n in range(qn.min_stages, qn.max_stages + 1):
@@ -287,6 +322,20 @@ def test_pruned_search_matches_brute_force_coaxial():
     q = _valid_query(target_num=6, target_den=1, min_stages=2, max_stages=2,
                      teeth_min=6, teeth_max=24, coaxial=True)
     assert _search_keys(q) == _brute_force_keys(q)
+
+
+def test_direction_filtered_search_excludes_unity_and_matches_reference():
+    # The direction parity gate (in search()) and the 1:1-stage prune (in recurse())
+    # are independent mechanisms; confirm they compose. Target 2:1 over 6-20 has unity
+    # padding available, so the no-unity assertion is meaningful, and both directions
+    # stay well under the result cap (no truncation) so the brute-force equivalence holds.
+    for direction in ('same', 'opposite'):
+        q = _valid_query(target_num=2, target_den=1, min_stages=1, max_stages=2,
+                         teeth_min=6, teeth_max=20, direction=direction)
+        res = gt.search(q)
+        assert res.trains, f'expected non-empty results for direction={direction}'
+        assert not any(_has_unity_stage(t) for t in res.trains)
+        assert _search_keys(q) == _brute_force_keys(q)
 
 
 import json
@@ -480,7 +529,8 @@ def _brute_force_keys_bounded(q):
     out_lo = q.output_min if q.output_min is not None else L
     out_hi = q.output_max if q.output_max is not None else H
     target = Fraction(q.target_num, q.target_den)
-    all_stages = [gt.Stage(a, b) for a in range(L, H + 1) for b in range(L, H + 1)]
+    all_stages = [gt.Stage(a, b) for a in range(L, H + 1) for b in range(L, H + 1)
+                  if a != b]                       # 1:1 stages are excluded by the solver
 
     def admits(combo):
         in_ok = [k for k, s in enumerate(combo) if in_lo <= s.driving <= in_hi]

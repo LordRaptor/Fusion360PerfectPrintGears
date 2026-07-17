@@ -90,10 +90,13 @@ Calculator*) that searches for **compound clock gear trains** hitting an **exact
 ratio. It is a pure calculator — it creates no geometry.
 
 Enter a target ratio as `input : output` — turns of the input per turn of the output, any
-positive rational (e.g. `12 : 1` for a minutes-to-hours reduction, where the input turns 12×
-for each output turn) — plus a stage-count range and a single tooth-count range that every
-gear draws from. Each stage is one driving/driven mesh and may step the speed up or down, so
-the search covers both directions. Options:
+positive rational other than `1:1` (e.g. `12 : 1` for a minutes-to-hours reduction, where the
+input turns 12× for each output turn) — plus a stage-count range and a single tooth-count
+range that every gear draws from. Each stage is one driving/driven mesh and may step the
+speed up or down, so the search covers both directions. Every stage changes the ratio: 1:1
+pass-through stages (driving teeth = driven teeth) are never included in results, and a 1:1
+overall target is rejected — if you only need to reverse the output direction, add a 1:1
+idler gear yourself. Options:
 
 - **Rotation** — filter to trains whose output turns the *same* as, or *opposite* to, the
   input (this is a stage-count parity filter, independent of speed).
