@@ -219,12 +219,14 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
                 # Coaxial stage after the first: b is forced to coax_sum - a. Test the
                 # single candidate instead of scanning (and rejecting) the whole slice.
                 b = coax_sum - a
-                if b_lo <= b <= b_hi:
+                if b_lo <= b <= b_hi and b != a:   # skip 1:1 (pass-through) stages
                     recurse(remaining * Fraction(b, a), k - 1,
                             stages + (Stage(a, b),), coax_sum, (a, b))
             else:
                 for b in range(b_lo, b_hi + 1):
                     work[0] += 1
+                    if b == a:                     # skip 1:1 (pass-through) stages
+                        continue
                     # The first stage of a coaxial search fixes the shared sum S.
                     next_sum = a + b if q.coaxial else None
                     recurse(remaining * Fraction(b, a), k - 1,
