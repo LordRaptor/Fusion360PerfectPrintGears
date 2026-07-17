@@ -78,6 +78,10 @@ def validate(q: TrainQuery) -> list:
     errors = []
     if q.target_num <= 0 or q.target_den <= 0:
         errors.append('Target ratio P and Q must both be positive integers.')
+    elif q.target_num == q.target_den:
+        errors.append('Target ratio must not be 1:1 — a pass-through train serves '
+                      'no purpose. Add a 1:1 idler manually if you only need to '
+                      'reverse direction.')
     if q.teeth_min < 1:
         errors.append('Minimum tooth count must be at least 1.')
     if q.teeth_max < q.teeth_min:

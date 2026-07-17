@@ -55,6 +55,18 @@ def test_validate_allows_reduction_target():
     assert gt.validate(_valid_query(target_num=1, target_den=12)) == []
 
 
+def test_validate_rejects_one_to_one_target():
+    errors = gt.validate(_valid_query(target_num=5, target_den=5))
+    assert errors, 'a 1:1 target must be rejected'
+    assert any('1:1' in e for e in errors)
+
+
+def test_search_reports_error_for_one_to_one_target():
+    res = gt.search(_valid_query(target_num=1, target_den=1))
+    assert res.error is not None
+    assert not res.trains
+
+
 def test_validate_rejects_bad_ranges_and_direction():
     assert gt.validate(_valid_query(teeth_max=5)) != []          # teeth_max < teeth_min
     assert gt.validate(_valid_query(max_stages=0)) != []         # max_stages < min_stages
