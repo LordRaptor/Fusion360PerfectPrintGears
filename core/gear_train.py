@@ -226,6 +226,8 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
             return
         if k == 0:
             if remaining == 1:
+                if not q.monotonic and not _is_irreducible(stages):
+                    return                    # reducible -> drop, do not count
                 if bounded:
                     arranged = _arrange_for_ends(stages, in_lo, in_hi, out_lo, out_hi)
                     if arranged is not None:

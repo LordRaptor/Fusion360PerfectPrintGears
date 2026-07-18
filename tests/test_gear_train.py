@@ -622,4 +622,42 @@ def test_trainquery_monotonic_defaults_false():
 def test_trainquery_monotonic_can_be_set_and_is_valid():
     q = _valid_query(monotonic=True)
     assert q.monotonic is True
+
+
+def _train_has_cancelling_subset(train):
+    """Independent reducibility check for tests: True iff some non-empty proper subset of
+    the train's stages has a Fraction ratio-product of exactly 1."""
+    stages = train.stages
+    n = len(stages)
+    ratios = [Fraction(s.driving, s.driven) for s in stages]
+    for size in range(1, n):
+        for combo in itertools.combinations(range(n), size):
+            prod = Fraction(1)
+            for i in combo:
+                prod *= ratios[i]
+            if prod == 1:
+                return True
+    return False
+
+
+def test_search_returns_no_reducible_trains():
+    # 2:1 over 6..24 up to 3 stages: without R1, padded trains like
+    # (12,6)+(8,16)+(16,8) or (12,6)+(8,16)+(20,10) (a cancelling reciprocal subset) would
+    # appear. R1 must drop every reducible train while keeping genuine solutions.
+    q = _valid_query(target_num=2, target_den=1, min_stages=1, max_stages=3,
+                     teeth_min=6, teeth_max=24)
+    res = gt.search(q)
+    assert res.trains, 'expected irreducible 2:1 solutions to still exist'
+    assert not any(_train_has_cancelling_subset(t) for t in res.trains)
+
+
+def test_generate_keeps_trimming_train():
+    # The mixed-direction trimming train (90,6)+(72,90) = 15 * 4/5 = 12 is irreducible and
+    # must survive R1 (its proper subsets are {15} and {4/5}, neither is 1). Uses _generate
+    # (uncapped) not search(): this train's tooth sum (258) is large, so search()'s
+    # MAX_RESULTS/total-teeth cap would truncate it out for the wrong reason.
+    q = _valid_query(target_num=12, target_den=1, min_stages=2, max_stages=2,
+                     teeth_min=6, teeth_max=90)
+    ms = _stage_multisets(gt._generate(q, 2))
+    assert tuple(sorted([(90, 6), (72, 90)])) in ms
     assert gt.validate(q) == []          # a plain bool needs no new validation rule
