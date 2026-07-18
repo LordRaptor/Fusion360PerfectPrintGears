@@ -149,20 +149,19 @@ def _arrange_for_ends(stages, in_lo, in_hi, out_lo, out_hi):
 
 
 def _is_irreducible(stages) -> bool:
-    """True iff NO non-empty subset of `stages` (including the full set) has an exact
-    Fraction ratio-product of 1. A reducible train has such a subset -- you could delete
-    those stages (and, if it was the full set, be left with an empty/no-op train) and get
-    a strictly shorter train with the identical overall ratio, so they are dead weight.
+    """True iff NO non-empty proper subset of `stages` has an exact Fraction ratio-product
+    of 1. A reducible train has such a subset -- you could delete those stages and get a
+    strictly shorter train with the identical overall ratio, so they are dead weight.
 
     `stages` is a tuple of Stage. Stage counts are tiny (a handful), so iterating the
-    2**n - 1 non-empty subsets is cheap. Uses exact Fraction arithmetic (no tolerance).
-    A 1-stage train has only its own singleton subset, so it's irreducible unless that
-    lone stage is itself a unity (1:1) stage -- already pruned at placement in normal
-    search usage; the general check harmlessly covers it too.
+    2**n - 2 proper non-empty subsets is cheap. Uses exact Fraction arithmetic (no
+    tolerance). A 1-stage train has no proper non-empty subset -> trivially irreducible.
+    A size-1 subset equal to 1 would be a unity stage (already pruned at placement);
+    the general check harmlessly covers it too.
     """
     n = len(stages)
     ratios = [s.ratio() for s in stages]
-    for size in range(1, n + 1):              # non-empty (size >= 1), up to the full set
+    for size in range(1, n):                 # proper (size < n), non-empty (size >= 1)
         for combo in combinations(range(n), size):
             prod = Fraction(1)
             for i in combo:

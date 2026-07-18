@@ -22,14 +22,16 @@ def test_is_irreducible_lone_stage_is_irreducible():
 
 
 def test_is_irreducible_tooth_identical_reciprocal_pair_is_reducible():
-    # (8,32) * (32,8) = 1/4 * 4 = 1  -> the two stages cancel.
-    stages = (gt.Stage(8, 32), gt.Stage(32, 8))
+    # A reciprocal pair (8,32)+(32,8) = 1/4 * 4 = 1 as a PROPER subset of a 3-stage train
+    # (third stage (24,6)=4 keeps the full product 4 != 1) -> the pair cancels -> reducible.
+    stages = (gt.Stage(8, 32), gt.Stage(32, 8), gt.Stage(24, 6))
     assert gt._is_irreducible(stages) is False
 
 
 def test_is_irreducible_value_equivalent_reciprocal_pair_is_reducible():
-    # Different teeth, same cancellation: (8,16) * (20,10) = 1/2 * 2 = 1.
-    stages = (gt.Stage(8, 16), gt.Stage(20, 10))
+    # Value-equivalent reciprocals (8,16)+(20,10) = 1/2 * 2 = 1 as a proper subset of a
+    # 3-stage train (third stage (24,6)=4) -> different teeth, same cancellation -> reducible.
+    stages = (gt.Stage(8, 16), gt.Stage(20, 10), gt.Stage(24, 6))
     assert gt._is_irreducible(stages) is False
 
 
