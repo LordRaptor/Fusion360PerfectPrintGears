@@ -215,6 +215,10 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
     bounded = any(v is not None for v in
                   (q.input_min, q.input_max, q.output_min, q.output_max))
     target = Fraction(q.target_num, q.target_den)
+    # R2 (monotonic): when set, tighten every stage to the target's speed direction.
+    # target != 1 is guaranteed by validate() (1:1 targets are rejected).
+    step_up = q.monotonic and target > 1     # every stage must be driving > driven
+    step_down = q.monotonic and target < 1   # every stage must be driving < driven
     work = [0]                           # stage placements explored; bounded by work_budget
 
     def stop() -> bool:
@@ -246,6 +250,10 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
             b_hi = min(H, math.floor(a * hi / remaining))
             if a == pa:                  # non-decreasing order: same driving -> driven >= pb
                 b_lo = max(b_lo, pb)
+            if step_up:
+                b_hi = min(b_hi, a - 1)   # R2: driven < driving (step-up stage)
+            elif step_down:
+                b_lo = max(b_lo, a + 1)   # R2: driven > driving (step-down stage)
             if coax_sum is not None:
                 # Coaxial stage after the first: b is forced to coax_sum - a. Test the
                 # single candidate instead of scanning (and rejecting) the whole slice.

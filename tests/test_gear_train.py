@@ -668,3 +668,64 @@ def test_generate_keeps_trimming_train():
                      teeth_min=6, teeth_max=90)
     ms = _stage_multisets(gt._generate(q, 2))
     assert tuple(sorted([(90, 6), (72, 90)])) in ms
+
+
+def test_monotonic_stepup_target_all_stages_step_up():
+    # Step-up target (2:1). With monotonic on, every stage must have driving > driven.
+    q = _valid_query(target_num=2, target_den=1, min_stages=1, max_stages=3,
+                     teeth_min=6, teeth_max=24, monotonic=True)
+    res = gt.search(q)
+    assert res.trains, 'expected monotonic step-up solutions'
+    for t in res.trains:
+        assert all(s.driving > s.driven for s in t.stages)
+
+
+def test_monotonic_stepdown_target_all_stages_step_down():
+    # Step-down target (1:2). With monotonic on, every stage must have driving < driven.
+    q = _valid_query(target_num=1, target_den=2, min_stages=1, max_stages=3,
+                     teeth_min=6, teeth_max=24, monotonic=True)
+    res = gt.search(q)
+    assert res.trains, 'expected monotonic step-down solutions'
+    for t in res.trains:
+        assert all(s.driving < s.driven for s in t.stages)
+
+
+def test_monotonic_off_still_returns_trimming_train():
+    # Guards against R2 leaking on: with monotonic OFF (default), the mixed-direction
+    # trimming train (90,6)+(72,90) must still appear. Uses _generate (uncapped) so the
+    # large-tooth-sum train is not lost to search()'s MAX_RESULTS truncation.
+    q = _valid_query(target_num=12, target_den=1, min_stages=2, max_stages=2,
+                     teeth_min=6, teeth_max=90, monotonic=False)
+    ms = _stage_multisets(gt._generate(q, 2))
+    assert tuple(sorted([(90, 6), (72, 90)])) in ms
+
+
+def test_monotonic_on_removes_trimming_train():
+    # The trimming train has a step-DOWN stage (72,90); for a step-up target it must be
+    # excluded when monotonic is on. _generate (uncapped) proves absence is R2, not the cap.
+    q = _valid_query(target_num=12, target_den=1, min_stages=2, max_stages=2,
+                     teeth_min=6, teeth_max=90, monotonic=True)
+    ms = _stage_multisets(gt._generate(q, 2))
+    assert tuple(sorted([(90, 6), (72, 90)])) not in ms
+
+
+def test_monotonic_composes_with_coaxial():
+    # Coaxial + monotonic: every stage same tooth sum AND every stage step-up (12:1).
+    q = _valid_query(target_num=12, target_den=1, min_stages=2, max_stages=2,
+                     teeth_min=6, teeth_max=90, coaxial=True, monotonic=True)
+    res = gt.search(q)
+    assert res.trains, 'expected coaxial monotonic solutions'
+    for t in res.trains:
+        assert len({s.tooth_sum() for s in t.stages}) == 1
+        assert all(s.driving > s.driven for s in t.stages)
+
+
+def test_monotonic_composes_with_direction_parity():
+    # direction='same' (even stage counts only) + monotonic: still all-monotonic, all-even.
+    q = _valid_query(target_num=12, target_den=1, min_stages=1, max_stages=3,
+                     teeth_min=6, teeth_max=60, direction='same', monotonic=True)
+    res = gt.search(q)
+    assert res.trains, 'expected even-count monotonic solutions'
+    for t in res.trains:
+        assert len(t.stages) % 2 == 0
+        assert all(s.driving > s.driven for s in t.stages)
