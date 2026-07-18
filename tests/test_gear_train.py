@@ -622,6 +622,7 @@ def test_trainquery_monotonic_defaults_false():
 def test_trainquery_monotonic_can_be_set_and_is_valid():
     q = _valid_query(monotonic=True)
     assert q.monotonic is True
+    assert gt.validate(q) == []          # a plain bool needs no new validation rule
 
 
 def _train_has_cancelling_subset(train):
@@ -641,13 +642,20 @@ def _train_has_cancelling_subset(train):
 
 
 def test_search_returns_no_reducible_trains():
-    # 2:1 over 6..24 up to 3 stages: without R1, padded trains like
-    # (12,6)+(8,16)+(16,8) or (12,6)+(8,16)+(20,10) (a cancelling reciprocal subset) would
-    # appear. R1 must drop every reducible train while keeping genuine solutions.
+    # 2:1 over 6..12 up to 3 stages. The range is deliberately small so the WHOLE result set
+    # (44 trains: 1 one-stage, 7 two-stage, 36 three-stage) fits under MAX_RESULTS and is not
+    # truncated -- so 3-stage trains actually reach res.trains. (With a WIDE range the 1-2
+    # stage trains fill the 200-cap before any 3-stage train is generated, so R1 would never
+    # be exercised through search() and this test would be vacuous.) Without R1 there are 61
+    # distinct 3-stage 2:1 trains here, 25 of them reducible (padded reciprocal subsets like
+    # (12,6)+(7,8)+(8,7)); R1 must drop all 25 while keeping the 36 genuine ones.
     q = _valid_query(target_num=2, target_den=1, min_stages=1, max_stages=3,
-                     teeth_min=6, teeth_max=24)
+                     teeth_min=6, teeth_max=12)
     res = gt.search(q)
     assert res.trains, 'expected irreducible 2:1 solutions to still exist'
+    assert not res.truncated, 'range must be small enough that 3-stage trains are not capped out'
+    assert any(len(t.stages) == 3 for t in res.trains), \
+        'expected 3-stage trains in results so R1 is actually exercised end-to-end'
     assert not any(_train_has_cancelling_subset(t) for t in res.trains)
 
 
