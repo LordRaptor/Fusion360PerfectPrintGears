@@ -612,3 +612,14 @@ def test_pruned_search_matches_brute_force_coaxial_with_end_bounds():
     bounded = _search_keys(q)
     assert bounded, 'expected non-empty coaxial+bounds result'
     assert bounded == _brute_force_keys_bounded(q)
+
+
+def test_trainquery_monotonic_defaults_false():
+    q = _valid_query()
+    assert q.monotonic is False
+
+
+def test_trainquery_monotonic_can_be_set_and_is_valid():
+    q = _valid_query(monotonic=True)
+    assert q.monotonic is True
+    assert gt.validate(q) == []          # a plain bool needs no new validation rule

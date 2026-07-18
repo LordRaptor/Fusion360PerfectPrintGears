@@ -72,6 +72,11 @@ class TrainQuery:
     output_min: int | None = None
     output_max: int | None = None
 
+    # If True, every stage must match the target's SPEED direction (all step-up for a
+    # step-up target, all step-down for a step-down target). Strictly stronger than the
+    # always-on irreducibility rule. NOT the same as `direction` (which is rotation sense).
+    monotonic: bool = False
+
 
 def validate(q: TrainQuery) -> list:
     """Return a list of hard-error strings (empty == valid). Small teeth and the
