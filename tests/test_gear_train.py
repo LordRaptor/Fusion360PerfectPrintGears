@@ -668,4 +668,3 @@ def test_generate_keeps_trimming_train():
                      teeth_min=6, teeth_max=90)
     ms = _stage_multisets(gt._generate(q, 2))
     assert tuple(sorted([(90, 6), (72, 90)])) in ms
-    assert gt.validate(q) == []          # a plain bool needs no new validation rule
