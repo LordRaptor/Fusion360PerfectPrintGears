@@ -4,6 +4,24 @@
 
 ## v1.11.0 (2026-07-17)
 
+### Documentation
+
+- Note gear-train calculator excludes 1:1 stages and targets
+  ([`bc0bc98`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/bc0bc98a09a286c099dd8392a41a26138073f5d0))
+
+### Features
+
+- **engine**: Exclude 1:1 stages from gear-train search results
+  ([`422b1ac`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/422b1acbd19a3397db7dfb3c1ca53062d108d15f))
+
+- **engine**: Reject a 1:1 target in the gear-train calculator
+  ([`69c7c29`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/69c7c29402d3745a95c249ebfc301238b248d765))
+
+### Testing
+
+- **engine**: Cover direction filter combined with 1:1-stage exclusion
+  ([`20b2c38`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/20b2c38d2c21c054a2a12aab2e17e31a4aa71996))
+
 
 ## v1.10.0 (2026-07-16)
 
