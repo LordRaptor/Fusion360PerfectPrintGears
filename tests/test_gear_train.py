@@ -710,22 +710,40 @@ def test_monotonic_on_removes_trimming_train():
 
 
 def test_monotonic_composes_with_coaxial():
-    # Coaxial + monotonic: every stage same tooth sum AND every stage step-up (12:1).
-    q = _valid_query(target_num=12, target_den=1, min_stages=2, max_stages=2,
-                     teeth_min=6, teeth_max=90, coaxial=True, monotonic=True)
-    res = gt.search(q)
-    assert res.trains, 'expected coaxial monotonic solutions'
-    for t in res.trains:
-        assert len({s.tooth_sum() for s in t.stages}) == 1
-        assert all(s.driving > s.driven for s in t.stages)
+    # Coaxial + monotonic must actually PRUNE (not just pass invariants): for 2:1 coaxial over
+    # 6..30 there are 3 trains without monotonic, TWO of them mixed-direction (a step-down
+    # stage) -- (10,20)+(24,6) and (16,24)+(30,10) -- vs the all-step-up (20,15)+(21,14).
+    # Monotonic must remove the two mixed ones, leaving only the step-up train. This also
+    # exercises R2 inside the coaxial single-candidate branch: the tightened b_lo/b_hi must
+    # reject the wrong-direction candidate (a regression that moved R2 after the coaxial test
+    # would fail here). Non-vacuous by construction (a mixed train demonstrably exists when
+    # monotonic is off).
+    base = dict(target_num=2, target_den=1, min_stages=2, max_stages=2,
+                teeth_min=6, teeth_max=30, coaxial=True)
+    off = gt.search(_valid_query(monotonic=False, **base))
+    on = gt.search(_valid_query(monotonic=True, **base))
+    assert not off.truncated and not on.truncated
+    assert any(any(s.driving < s.driven for s in t.stages) for t in off.trains), \
+        'expected a mixed-direction coaxial train when monotonic is off'
+    assert on.trains and len(on.trains) < len(off.trains)     # monotonic strictly pruned
+    for t in on.trains:
+        assert len({s.tooth_sum() for s in t.stages}) == 1     # still coaxial
+        assert all(s.driving > s.driven for s in t.stages)     # all step-up
 
 
 def test_monotonic_composes_with_direction_parity():
-    # direction='same' (even stage counts only) + monotonic: still all-monotonic, all-even.
-    q = _valid_query(target_num=12, target_den=1, min_stages=1, max_stages=3,
-                     teeth_min=6, teeth_max=60, direction='same', monotonic=True)
-    res = gt.search(q)
-    assert res.trains, 'expected even-count monotonic solutions'
-    for t in res.trains:
-        assert len(t.stages) % 2 == 0
-        assert all(s.driving > s.driven for s in t.stages)
+    # direction='same' (even stage counts only) + monotonic must both FILTER and PRUNE: for
+    # 3:1 over 6..24 with direction='same' there are mixed-direction 2-stage trains without
+    # monotonic (19 of 122); monotonic removes them, keeping only all-step-up even-count
+    # trains. Non-vacuous (a mixed train demonstrably exists when monotonic is off).
+    base = dict(target_num=3, target_den=1, min_stages=1, max_stages=3,
+                teeth_min=6, teeth_max=24, direction='same')
+    off = gt.search(_valid_query(monotonic=False, **base))
+    on = gt.search(_valid_query(monotonic=True, **base))
+    assert not off.truncated and not on.truncated
+    assert any(any(s.driving < s.driven for s in t.stages) for t in off.trains), \
+        'expected a mixed-direction train when monotonic is off'
+    assert on.trains and len(on.trains) < len(off.trains)     # monotonic strictly pruned
+    for t in on.trains:
+        assert len(t.stages) % 2 == 0                          # parity filter still holds
+        assert all(s.driving > s.driven for s in t.stages)     # all step-up
