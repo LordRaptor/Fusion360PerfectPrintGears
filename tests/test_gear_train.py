@@ -16,6 +16,36 @@ def test_stage_can_be_a_reduction():
     assert s.tooth_sum() == 162
 
 
+def test_is_irreducible_lone_stage_is_irreducible():
+    # A single stage has no proper non-empty subset -> trivially irreducible.
+    assert gt._is_irreducible((gt.Stage(90, 6),)) is True
+
+
+def test_is_irreducible_tooth_identical_reciprocal_pair_is_reducible():
+    # (8,32) * (32,8) = 1/4 * 4 = 1  -> the two stages cancel.
+    stages = (gt.Stage(8, 32), gt.Stage(32, 8))
+    assert gt._is_irreducible(stages) is False
+
+
+def test_is_irreducible_value_equivalent_reciprocal_pair_is_reducible():
+    # Different teeth, same cancellation: (8,16) * (20,10) = 1/2 * 2 = 1.
+    stages = (gt.Stage(8, 16), gt.Stage(20, 10))
+    assert gt._is_irreducible(stages) is False
+
+
+def test_is_irreducible_trimming_pair_is_irreducible():
+    # (90,6) * (72,90) = 15 * 4/5 = 12. Proper subsets {15}, {4/5}; neither is 1 -> keep.
+    stages = (gt.Stage(90, 6), gt.Stage(72, 90))
+    assert gt._is_irreducible(stages) is True
+
+
+def test_is_irreducible_three_stage_cancelling_subset_is_reducible():
+    # A 4-stage train whose first THREE stages form a proper subset with product 1:
+    # (12,6) * (6,18) * (18,12) = 2 * 1/3 * 3/2 = 1. The 4th stage keeps it a proper subset.
+    stages = (gt.Stage(12, 6), gt.Stage(6, 18), gt.Stage(18, 12), gt.Stage(24, 12))
+    assert gt._is_irreducible(stages) is False
+
+
 def test_geartrain_ratio_is_product():
     train = gt.GearTrain(stages=(gt.Stage(36, 6), gt.Stage(40, 20)))
     assert train.ratio() == Fraction(12, 1)   # 6 * 2

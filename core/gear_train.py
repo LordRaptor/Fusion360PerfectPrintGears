@@ -8,6 +8,7 @@ its stage ratios. See docs/superpowers/specs/2026-06-28-gear-train-calculator-de
 from __future__ import annotations
 
 import math
+from itertools import combinations
 from dataclasses import dataclass, field, replace
 from fractions import Fraction
 
@@ -145,6 +146,30 @@ def _arrange_for_ends(stages, in_lo, in_hi, out_lo, out_hi):
                 middle = [stages[k] for k in range(n) if k != i and k != j]
                 return (stages[i],) + tuple(middle) + (stages[j],)
     return None
+
+
+def _is_irreducible(stages) -> bool:
+    """True iff NO non-empty subset of `stages` (including the full set) has an exact
+    Fraction ratio-product of 1. A reducible train has such a subset -- you could delete
+    those stages (and, if it was the full set, be left with an empty/no-op train) and get
+    a strictly shorter train with the identical overall ratio, so they are dead weight.
+
+    `stages` is a tuple of Stage. Stage counts are tiny (a handful), so iterating the
+    2**n - 1 non-empty subsets is cheap. Uses exact Fraction arithmetic (no tolerance).
+    A 1-stage train has only its own singleton subset, so it's irreducible unless that
+    lone stage is itself a unity (1:1) stage -- already pruned at placement in normal
+    search usage; the general check harmlessly covers it too.
+    """
+    n = len(stages)
+    ratios = [s.ratio() for s in stages]
+    for size in range(1, n + 1):              # non-empty (size >= 1), up to the full set
+        for combo in combinations(range(n), size):
+            prod = Fraction(1)
+            for i in combo:
+                prod *= ratios[i]
+            if prod == 1:
+                return False
+    return True
 
 
 def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
