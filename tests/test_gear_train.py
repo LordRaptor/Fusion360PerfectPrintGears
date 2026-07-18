@@ -808,3 +808,39 @@ def test_pruned_search_matches_brute_force_monotonic():
     for k in keys:
         assert all(a > b for a, b in k)         # every stage step-up
     assert keys == _brute_force_keys(q)
+
+
+def test_monotonic_composes_with_coaxial_stepdown():
+    # Step-DOWN coaxial + monotonic (mirror of the step-up coaxial test): for 1:2 coaxial over
+    # 6..30 there are 3 trains without monotonic, two of them mixed-direction (a step-up
+    # stage); monotonic keeps only the all-step-down train. Exercises R2's step_down branch in
+    # the coaxial single-candidate path. Non-vacuous (a mixed train exists when monotonic off).
+    base = dict(target_num=1, target_den=2, min_stages=2, max_stages=2,
+                teeth_min=6, teeth_max=30, coaxial=True)
+    off = gt.search(_valid_query(monotonic=False, **base))
+    on = gt.search(_valid_query(monotonic=True, **base))
+    assert not off.truncated and not on.truncated
+    assert any(any(s.driving > s.driven for s in t.stages) for t in off.trains), \
+        'expected a mixed-direction (step-up) coaxial train when monotonic is off'
+    assert on.trains and len(on.trains) < len(off.trains)     # monotonic strictly pruned
+    for t in on.trains:
+        assert len({s.tooth_sum() for s in t.stages}) == 1     # still coaxial
+        assert all(s.driving < s.driven for s in t.stages)     # all step-down
+
+
+def test_monotonic_composes_with_end_gear_bounds():
+    # R2 + end-gear bounds: 12:1 with the input gear bounded to 18..20 over 6..90. Without
+    # monotonic, some qualifying trains contain a step-down stage; monotonic removes those and
+    # keeps only all-step-up trains, all still honoring the input bound (first stage's driving
+    # gear in 18..20). Non-vacuous (a bounded mixed-direction train exists when monotonic off).
+    base = dict(target_num=12, target_den=1, min_stages=2, max_stages=2,
+                teeth_min=6, teeth_max=90, input_min=18, input_max=20)
+    off = gt.search(_valid_query(monotonic=False, **base))
+    on = gt.search(_valid_query(monotonic=True, **base))
+    assert not off.truncated and not on.truncated
+    assert any(any(s.driving < s.driven for s in t.stages) for t in off.trains), \
+        'expected a mixed-direction train among the bounded results when monotonic is off'
+    assert on.trains and len(on.trains) < len(off.trains)     # monotonic strictly pruned
+    for t in on.trains:
+        assert 18 <= t.stages[0].driving <= 20                 # input bound still honored
+        assert all(s.driving > s.driven for s in t.stages)     # all step-up
