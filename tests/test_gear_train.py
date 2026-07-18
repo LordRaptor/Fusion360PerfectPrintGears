@@ -307,6 +307,28 @@ def test_no_coaxial_result_contains_a_unity_stage():
 import itertools
 
 
+def _combo_is_irreducible(combo):
+    """Independent (of gt._is_irreducible) reference check: True iff no non-empty proper
+    subset of `combo` (a sequence of Stage) has a Fraction ratio-product of 1."""
+    n = len(combo)
+    ratios = [Fraction(s.driving, s.driven) for s in combo]
+    for size in range(1, n):
+        for idx in itertools.combinations(range(n), size):
+            prod = Fraction(1)
+            for i in idx:
+                prod *= ratios[i]
+            if prod == 1:
+                return False
+    return True
+
+
+def _combo_is_monotonic(combo, target):
+    """True iff every stage points the target's speed direction (target != 1 guaranteed)."""
+    if target > 1:
+        return all(s.driving > s.driven for s in combo)
+    return all(s.driving < s.driven for s in combo)
+
+
 def _brute_force_keys(q):
     """Obvious O(range^(2n)) reference: enumerate every stage combination, keep exact
     matches (respecting direction parity + coaxial), return their canonical keys."""
@@ -328,8 +350,14 @@ def _brute_force_keys(q):
             prod = Fraction(1)
             for s in combo:
                 prod *= s.ratio()
-            if prod == target:
-                keys.add(tuple(sorted((s.driving, s.driven) for s in combo)))
+            if prod != target:
+                continue
+            if qn.monotonic:
+                if not _combo_is_monotonic(combo, target):
+                    continue
+            elif not _combo_is_irreducible(combo):
+                continue
+            keys.add(tuple(sorted((s.driving, s.driven) for s in combo)))
     return keys
 
 
@@ -586,6 +614,11 @@ def _brute_force_keys_bounded(q):
                 prod *= s.ratio()
             if prod != target:
                 continue
+            if qn.monotonic:
+                if not _combo_is_monotonic(combo, target):
+                    continue
+            elif not _combo_is_irreducible(combo):
+                continue
             if admits(combo):
                 keys.add(tuple(sorted((s.driving, s.driven) for s in combo)))
     return keys
@@ -747,3 +780,31 @@ def test_monotonic_composes_with_direction_parity():
     for t in on.trains:
         assert len(t.stages) % 2 == 0                          # parity filter still holds
         assert all(s.driving > s.driven for s in t.stages)     # all step-up
+
+
+def test_pruned_search_matches_brute_force_three_stage_irreducible():
+    # 2:1 over 6..12 up to 3 stages: at n=3, reducible padded trains (a cancelling
+    # reciprocal subset plus a real stage) exist in a naive enumeration. R1 must drop them
+    # in BOTH search() and the reference; parity confirms they agree. Small range keeps the
+    # O(range^6) reference fast (all_stages ~ 42, 42**3 ~ 74k combos).
+    q = _valid_query(target_num=2, target_den=1, min_stages=1, max_stages=3,
+                     teeth_min=6, teeth_max=12)
+    keys = _search_keys(q)
+    assert keys, 'expected irreducible solutions'
+    # Independent of R1: no returned train has a cancelling subset (rebuild a train per key).
+    for k in keys:
+        train = gt.GearTrain(tuple(gt.Stage(a, b) for a, b in k))
+        assert not _train_has_cancelling_subset(train)
+    assert keys == _brute_force_keys(q)
+
+
+def test_pruned_search_matches_brute_force_monotonic():
+    # Monotonic 2:1 over 6..12 up to 3 stages: every stage step-up in both search() and
+    # the reference; parity confirms the R2 prune matches an exhaustive same-direction scan.
+    q = _valid_query(target_num=2, target_den=1, min_stages=1, max_stages=3,
+                     teeth_min=6, teeth_max=12, monotonic=True)
+    keys = _search_keys(q)
+    assert keys, 'expected monotonic solutions'
+    for k in keys:
+        assert all(a > b for a, b in k)         # every stage step-up
+    assert keys == _brute_force_keys(q)
