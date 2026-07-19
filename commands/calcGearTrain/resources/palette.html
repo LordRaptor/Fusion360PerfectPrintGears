@@ -44,15 +44,15 @@
 
     <fieldset>
       <legend>Options</legend>
-      <label>Rotation
+      <label class="opt-row">Rotation
         <select id="direction">
           <option value="same" selected>Same as input</option>
           <option value="any">Any</option>
           <option value="opposite">Opposite to input</option>
         </select>
       </label>
-      <label><input type="checkbox" id="coaxial"> Coaxial input/output</label>
-      <label title="No reduction stages in a step-up train, and no step-up stages in a reduction train. Removes mixed-direction trimming trains.">
+      <label class="opt-row"><input type="checkbox" id="coaxial"> Coaxial input/output</label>
+      <label class="opt-row" title="No reduction stages in a step-up train, and no step-up stages in a reduction train. Removes mixed-direction trimming trains.">
         <input type="checkbox" id="monotonic"> Same-direction stages only</label>
     </fieldset>
 
