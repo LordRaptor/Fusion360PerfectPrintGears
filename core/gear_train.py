@@ -8,6 +8,7 @@ its stage ratios. See docs/superpowers/specs/2026-06-28-gear-train-calculator-de
 from __future__ import annotations
 
 import math
+from itertools import combinations
 from dataclasses import dataclass, field, replace
 from fractions import Fraction
 
@@ -70,6 +71,11 @@ class TrainQuery:
     input_max: int | None = None
     output_min: int | None = None
     output_max: int | None = None
+
+    # If True, every stage must match the target's SPEED direction (all step-up for a
+    # step-up target, all step-down for a step-down target). Strictly stronger than the
+    # always-on irreducibility rule. NOT the same as `direction` (which is rotation sense).
+    monotonic: bool = False
 
 
 def validate(q: TrainQuery) -> list:
@@ -147,6 +153,29 @@ def _arrange_for_ends(stages, in_lo, in_hi, out_lo, out_hi):
     return None
 
 
+def _is_irreducible(stages) -> bool:
+    """True iff NO non-empty proper subset of `stages` has an exact Fraction ratio-product
+    of 1. A reducible train has such a subset -- you could delete those stages and get a
+    strictly shorter train with the identical overall ratio, so they are dead weight.
+
+    `stages` is a tuple of Stage. Stage counts are tiny (a handful), so iterating the
+    2**n - 2 proper non-empty subsets is cheap. Uses exact Fraction arithmetic (no
+    tolerance). A 1-stage train has no proper non-empty subset -> trivially irreducible.
+    A size-1 subset equal to 1 would be a unity stage (already pruned at placement);
+    the general check harmlessly covers it too.
+    """
+    n = len(stages)
+    ratios = [s.ratio() for s in stages]
+    for size in range(1, n):                 # proper (size < n), non-empty (size >= 1)
+        for combo in combinations(range(n), size):
+            prod = Fraction(1)
+            for i in combo:
+                prod *= ratios[i]
+            if prod == 1:
+                return False
+    return True
+
+
 def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
     """Enumerate exact `n`-stage trains; return (trains, truncated).
 
@@ -186,6 +215,10 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
     bounded = any(v is not None for v in
                   (q.input_min, q.input_max, q.output_min, q.output_max))
     target = Fraction(q.target_num, q.target_den)
+    # R2 (monotonic): when set, tighten every stage to the target's speed direction.
+    # target != 1 is guaranteed by validate() (1:1 targets are rejected).
+    step_up = q.monotonic and target > 1     # every stage must be driving > driven
+    step_down = q.monotonic and target < 1   # every stage must be driving < driven
     work = [0]                           # stage placements explored; bounded by work_budget
 
     def stop() -> bool:
@@ -197,6 +230,8 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
             return
         if k == 0:
             if remaining == 1:
+                if not q.monotonic and not _is_irreducible(stages):
+                    return                    # reducible -> drop, do not count
                 if bounded:
                     arranged = _arrange_for_ends(stages, in_lo, in_hi, out_lo, out_hi)
                     if arranged is not None:
@@ -215,6 +250,10 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
             b_hi = min(H, math.floor(a * hi / remaining))
             if a == pa:                  # non-decreasing order: same driving -> driven >= pb
                 b_lo = max(b_lo, pb)
+            if step_up:
+                b_hi = min(b_hi, a - 1)   # R2: driven < driving (step-up stage)
+            elif step_down:
+                b_lo = max(b_lo, a + 1)   # R2: driven > driving (step-down stage)
             if coax_sum is not None:
                 # Coaxial stage after the first: b is forced to coax_sum - a. Test the
                 # single candidate instead of scanning (and rejecting) the whole slice.

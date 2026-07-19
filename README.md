@@ -93,16 +93,23 @@ Enter a target ratio as `input : output` — turns of the input per turn of the 
 positive rational other than `1:1` (e.g. `12 : 1` for a minutes-to-hours reduction, where the
 input turns 12× for each output turn) — plus a stage-count range and a single tooth-count
 range that every gear draws from. Each stage is one driving/driven mesh and may step the
-speed up or down, so the search covers both directions. Every stage changes the ratio: 1:1
-pass-through stages (driving teeth = driven teeth) are never included in results, and a 1:1
-overall target is rejected — if you only need to reverse the output direction, add a 1:1
-idler gear yourself. Options:
+speed up or down, so the search covers both directions. Every stage does real work: results
+are always **irreducible** — no non-empty subset of stages multiplies back to 1:1, so you can
+never delete a group of stages and keep the same ratio. This rules out 1:1 pass-through
+stages (driving teeth = driven teeth) and cancelling pairs alike (e.g. an `8÷32` reduction
+undone by a `32÷8` step-up). A 1:1 overall target is rejected — if you only need to reverse
+the output direction, add a 1:1 idler gear yourself. Options:
 
 - **Rotation** — filter to trains whose output turns the *same* as, or *opposite* to, the
   input (this is a stage-count parity filter, independent of speed).
 - **Coaxial input/output** — require the input and output to share one shaft. This forces
   every stage to share one tooth sum (equal center distance at one module) and at least two
   stages.
+- **Same-direction stages only** — require every stage to point the same speed direction as
+  the target: all step-up stages for a step-up target, all step-down stages for a step-down
+  target. Off by default. This drops mixed-direction *trimming* trains (a mild reduction that
+  trims an oversized step-up to land the target), giving a clean same-direction chain when
+  that is what you want.
 - **End gears (optional)** — independently bound the **input gear** (the first stage's
   driving gear) and/or the **output gear** (the last stage's driven gear) with their own
   min/max, each a narrowing within the general tooth range. Enable either with its checkbox

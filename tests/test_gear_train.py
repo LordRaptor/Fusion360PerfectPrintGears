@@ -16,6 +16,38 @@ def test_stage_can_be_a_reduction():
     assert s.tooth_sum() == 162
 
 
+def test_is_irreducible_lone_stage_is_irreducible():
+    # A single stage has no proper non-empty subset -> trivially irreducible.
+    assert gt._is_irreducible((gt.Stage(90, 6),)) is True
+
+
+def test_is_irreducible_tooth_identical_reciprocal_pair_is_reducible():
+    # A reciprocal pair (8,32)+(32,8) = 1/4 * 4 = 1 as a PROPER subset of a 3-stage train
+    # (third stage (24,6)=4 keeps the full product 4 != 1) -> the pair cancels -> reducible.
+    stages = (gt.Stage(8, 32), gt.Stage(32, 8), gt.Stage(24, 6))
+    assert gt._is_irreducible(stages) is False
+
+
+def test_is_irreducible_value_equivalent_reciprocal_pair_is_reducible():
+    # Value-equivalent reciprocals (8,16)+(20,10) = 1/2 * 2 = 1 as a proper subset of a
+    # 3-stage train (third stage (24,6)=4) -> different teeth, same cancellation -> reducible.
+    stages = (gt.Stage(8, 16), gt.Stage(20, 10), gt.Stage(24, 6))
+    assert gt._is_irreducible(stages) is False
+
+
+def test_is_irreducible_trimming_pair_is_irreducible():
+    # (90,6) * (72,90) = 15 * 4/5 = 12. Proper subsets {15}, {4/5}; neither is 1 -> keep.
+    stages = (gt.Stage(90, 6), gt.Stage(72, 90))
+    assert gt._is_irreducible(stages) is True
+
+
+def test_is_irreducible_three_stage_cancelling_subset_is_reducible():
+    # A 4-stage train whose first THREE stages form a proper subset with product 1:
+    # (12,6) * (6,18) * (18,12) = 2 * 1/3 * 3/2 = 1. The 4th stage keeps it a proper subset.
+    stages = (gt.Stage(12, 6), gt.Stage(6, 18), gt.Stage(18, 12), gt.Stage(24, 12))
+    assert gt._is_irreducible(stages) is False
+
+
 def test_geartrain_ratio_is_product():
     train = gt.GearTrain(stages=(gt.Stage(36, 6), gt.Stage(40, 20)))
     assert train.ratio() == Fraction(12, 1)   # 6 * 2
@@ -275,6 +307,28 @@ def test_no_coaxial_result_contains_a_unity_stage():
 import itertools
 
 
+def _combo_is_irreducible(combo):
+    """Independent (of gt._is_irreducible) reference check: True iff no non-empty proper
+    subset of `combo` (a sequence of Stage) has a Fraction ratio-product of 1."""
+    n = len(combo)
+    ratios = [Fraction(s.driving, s.driven) for s in combo]
+    for size in range(1, n):
+        for idx in itertools.combinations(range(n), size):
+            prod = Fraction(1)
+            for i in idx:
+                prod *= ratios[i]
+            if prod == 1:
+                return False
+    return True
+
+
+def _combo_is_monotonic(combo, target):
+    """True iff every stage points the target's speed direction (target != 1 guaranteed)."""
+    if target > 1:
+        return all(s.driving > s.driven for s in combo)
+    return all(s.driving < s.driven for s in combo)
+
+
 def _brute_force_keys(q):
     """Obvious O(range^(2n)) reference: enumerate every stage combination, keep exact
     matches (respecting direction parity + coaxial), return their canonical keys."""
@@ -296,8 +350,14 @@ def _brute_force_keys(q):
             prod = Fraction(1)
             for s in combo:
                 prod *= s.ratio()
-            if prod == target:
-                keys.add(tuple(sorted((s.driving, s.driven) for s in combo)))
+            if prod != target:
+                continue
+            if qn.monotonic:
+                if not _combo_is_monotonic(combo, target):
+                    continue
+            elif not _combo_is_irreducible(combo):
+                continue
+            keys.add(tuple(sorted((s.driving, s.driven) for s in combo)))
     return keys
 
 
@@ -554,6 +614,11 @@ def _brute_force_keys_bounded(q):
                 prod *= s.ratio()
             if prod != target:
                 continue
+            if qn.monotonic:
+                if not _combo_is_monotonic(combo, target):
+                    continue
+            elif not _combo_is_irreducible(combo):
+                continue
             if admits(combo):
                 keys.add(tuple(sorted((s.driving, s.driven) for s in combo)))
     return keys
@@ -580,3 +645,202 @@ def test_pruned_search_matches_brute_force_coaxial_with_end_bounds():
     bounded = _search_keys(q)
     assert bounded, 'expected non-empty coaxial+bounds result'
     assert bounded == _brute_force_keys_bounded(q)
+
+
+def test_trainquery_monotonic_defaults_false():
+    q = _valid_query()
+    assert q.monotonic is False
+
+
+def test_trainquery_monotonic_can_be_set_and_is_valid():
+    q = _valid_query(monotonic=True)
+    assert q.monotonic is True
+    assert gt.validate(q) == []          # a plain bool needs no new validation rule
+
+
+def _train_has_cancelling_subset(train):
+    """Independent reducibility check for tests: True iff some non-empty proper subset of
+    the train's stages has a Fraction ratio-product of exactly 1."""
+    stages = train.stages
+    n = len(stages)
+    ratios = [Fraction(s.driving, s.driven) for s in stages]
+    for size in range(1, n):
+        for combo in itertools.combinations(range(n), size):
+            prod = Fraction(1)
+            for i in combo:
+                prod *= ratios[i]
+            if prod == 1:
+                return True
+    return False
+
+
+def test_search_returns_no_reducible_trains():
+    # 2:1 over 6..12 up to 3 stages. The range is deliberately small so the WHOLE result set
+    # (44 trains: 1 one-stage, 7 two-stage, 36 three-stage) fits under MAX_RESULTS and is not
+    # truncated -- so 3-stage trains actually reach res.trains. (With a WIDE range the 1-2
+    # stage trains fill the 200-cap before any 3-stage train is generated, so R1 would never
+    # be exercised through search() and this test would be vacuous.) Without R1 there are 61
+    # distinct 3-stage 2:1 trains here, 25 of them reducible (padded reciprocal subsets like
+    # (12,6)+(7,8)+(8,7)); R1 must drop all 25 while keeping the 36 genuine ones.
+    q = _valid_query(target_num=2, target_den=1, min_stages=1, max_stages=3,
+                     teeth_min=6, teeth_max=12)
+    res = gt.search(q)
+    assert res.trains, 'expected irreducible 2:1 solutions to still exist'
+    assert not res.truncated, 'range must be small enough that 3-stage trains are not capped out'
+    assert any(len(t.stages) == 3 for t in res.trains), \
+        'expected 3-stage trains in results so R1 is actually exercised end-to-end'
+    assert not any(_train_has_cancelling_subset(t) for t in res.trains)
+
+
+def test_generate_keeps_trimming_train():
+    # The mixed-direction trimming train (90,6)+(72,90) = 15 * 4/5 = 12 is irreducible and
+    # must survive R1 (its proper subsets are {15} and {4/5}, neither is 1). Uses _generate
+    # (uncapped) not search(): this train's tooth sum (258) is large, so search()'s
+    # MAX_RESULTS/total-teeth cap would truncate it out for the wrong reason.
+    q = _valid_query(target_num=12, target_den=1, min_stages=2, max_stages=2,
+                     teeth_min=6, teeth_max=90)
+    ms = _stage_multisets(gt._generate(q, 2))
+    assert tuple(sorted([(90, 6), (72, 90)])) in ms
+
+
+def test_monotonic_stepup_target_all_stages_step_up():
+    # Step-up target (2:1). With monotonic on, every stage must have driving > driven.
+    q = _valid_query(target_num=2, target_den=1, min_stages=1, max_stages=3,
+                     teeth_min=6, teeth_max=24, monotonic=True)
+    res = gt.search(q)
+    assert res.trains, 'expected monotonic step-up solutions'
+    for t in res.trains:
+        assert all(s.driving > s.driven for s in t.stages)
+
+
+def test_monotonic_stepdown_target_all_stages_step_down():
+    # Step-down target (1:2). With monotonic on, every stage must have driving < driven.
+    q = _valid_query(target_num=1, target_den=2, min_stages=1, max_stages=3,
+                     teeth_min=6, teeth_max=24, monotonic=True)
+    res = gt.search(q)
+    assert res.trains, 'expected monotonic step-down solutions'
+    for t in res.trains:
+        assert all(s.driving < s.driven for s in t.stages)
+
+
+def test_monotonic_off_still_returns_trimming_train():
+    # Guards against R2 leaking on: with monotonic OFF (default), the mixed-direction
+    # trimming train (90,6)+(72,90) must still appear. Uses _generate (uncapped) so the
+    # large-tooth-sum train is not lost to search()'s MAX_RESULTS truncation.
+    q = _valid_query(target_num=12, target_den=1, min_stages=2, max_stages=2,
+                     teeth_min=6, teeth_max=90, monotonic=False)
+    ms = _stage_multisets(gt._generate(q, 2))
+    assert tuple(sorted([(90, 6), (72, 90)])) in ms
+
+
+def test_monotonic_on_removes_trimming_train():
+    # The trimming train has a step-DOWN stage (72,90); for a step-up target it must be
+    # excluded when monotonic is on. _generate (uncapped) proves absence is R2, not the cap.
+    q = _valid_query(target_num=12, target_den=1, min_stages=2, max_stages=2,
+                     teeth_min=6, teeth_max=90, monotonic=True)
+    ms = _stage_multisets(gt._generate(q, 2))
+    assert tuple(sorted([(90, 6), (72, 90)])) not in ms
+
+
+def test_monotonic_composes_with_coaxial():
+    # Coaxial + monotonic must actually PRUNE (not just pass invariants): for 2:1 coaxial over
+    # 6..30 there are 3 trains without monotonic, TWO of them mixed-direction (a step-down
+    # stage) -- (10,20)+(24,6) and (16,24)+(30,10) -- vs the all-step-up (20,15)+(21,14).
+    # Monotonic must remove the two mixed ones, leaving only the step-up train. This also
+    # exercises R2 inside the coaxial single-candidate branch: the tightened b_lo/b_hi must
+    # reject the wrong-direction candidate (a regression that moved R2 after the coaxial test
+    # would fail here). Non-vacuous by construction (a mixed train demonstrably exists when
+    # monotonic is off).
+    base = dict(target_num=2, target_den=1, min_stages=2, max_stages=2,
+                teeth_min=6, teeth_max=30, coaxial=True)
+    off = gt.search(_valid_query(monotonic=False, **base))
+    on = gt.search(_valid_query(monotonic=True, **base))
+    assert not off.truncated and not on.truncated
+    assert any(any(s.driving < s.driven for s in t.stages) for t in off.trains), \
+        'expected a mixed-direction coaxial train when monotonic is off'
+    assert on.trains and len(on.trains) < len(off.trains)     # monotonic strictly pruned
+    for t in on.trains:
+        assert len({s.tooth_sum() for s in t.stages}) == 1     # still coaxial
+        assert all(s.driving > s.driven for s in t.stages)     # all step-up
+
+
+def test_monotonic_composes_with_direction_parity():
+    # direction='same' (even stage counts only) + monotonic must both FILTER and PRUNE: for
+    # 3:1 over 6..24 with direction='same' there are mixed-direction 2-stage trains without
+    # monotonic (19 of 122); monotonic removes them, keeping only all-step-up even-count
+    # trains. Non-vacuous (a mixed train demonstrably exists when monotonic is off).
+    base = dict(target_num=3, target_den=1, min_stages=1, max_stages=3,
+                teeth_min=6, teeth_max=24, direction='same')
+    off = gt.search(_valid_query(monotonic=False, **base))
+    on = gt.search(_valid_query(monotonic=True, **base))
+    assert not off.truncated and not on.truncated
+    assert any(any(s.driving < s.driven for s in t.stages) for t in off.trains), \
+        'expected a mixed-direction train when monotonic is off'
+    assert on.trains and len(on.trains) < len(off.trains)     # monotonic strictly pruned
+    for t in on.trains:
+        assert len(t.stages) % 2 == 0                          # parity filter still holds
+        assert all(s.driving > s.driven for s in t.stages)     # all step-up
+
+
+def test_pruned_search_matches_brute_force_three_stage_irreducible():
+    # 2:1 over 6..12 up to 3 stages: at n=3, reducible padded trains (a cancelling
+    # reciprocal subset plus a real stage) exist in a naive enumeration. R1 must drop them
+    # in BOTH search() and the reference; parity confirms they agree. Small range keeps the
+    # O(range^6) reference fast (all_stages ~ 42, 42**3 ~ 74k combos).
+    q = _valid_query(target_num=2, target_den=1, min_stages=1, max_stages=3,
+                     teeth_min=6, teeth_max=12)
+    keys = _search_keys(q)
+    assert keys, 'expected irreducible solutions'
+    # Independent of R1: no returned train has a cancelling subset (rebuild a train per key).
+    for k in keys:
+        train = gt.GearTrain(tuple(gt.Stage(a, b) for a, b in k))
+        assert not _train_has_cancelling_subset(train)
+    assert keys == _brute_force_keys(q)
+
+
+def test_pruned_search_matches_brute_force_monotonic():
+    # Monotonic 2:1 over 6..12 up to 3 stages: every stage step-up in both search() and
+    # the reference; parity confirms the R2 prune matches an exhaustive same-direction scan.
+    q = _valid_query(target_num=2, target_den=1, min_stages=1, max_stages=3,
+                     teeth_min=6, teeth_max=12, monotonic=True)
+    keys = _search_keys(q)
+    assert keys, 'expected monotonic solutions'
+    for k in keys:
+        assert all(a > b for a, b in k)         # every stage step-up
+    assert keys == _brute_force_keys(q)
+
+
+def test_monotonic_composes_with_coaxial_stepdown():
+    # Step-DOWN coaxial + monotonic (mirror of the step-up coaxial test): for 1:2 coaxial over
+    # 6..30 there are 3 trains without monotonic, two of them mixed-direction (a step-up
+    # stage); monotonic keeps only the all-step-down train. Exercises R2's step_down branch in
+    # the coaxial single-candidate path. Non-vacuous (a mixed train exists when monotonic off).
+    base = dict(target_num=1, target_den=2, min_stages=2, max_stages=2,
+                teeth_min=6, teeth_max=30, coaxial=True)
+    off = gt.search(_valid_query(monotonic=False, **base))
+    on = gt.search(_valid_query(monotonic=True, **base))
+    assert not off.truncated and not on.truncated
+    assert any(any(s.driving > s.driven for s in t.stages) for t in off.trains), \
+        'expected a mixed-direction (step-up) coaxial train when monotonic is off'
+    assert on.trains and len(on.trains) < len(off.trains)     # monotonic strictly pruned
+    for t in on.trains:
+        assert len({s.tooth_sum() for s in t.stages}) == 1     # still coaxial
+        assert all(s.driving < s.driven for s in t.stages)     # all step-down
+
+
+def test_monotonic_composes_with_end_gear_bounds():
+    # R2 + end-gear bounds: 12:1 with the input gear bounded to 18..20 over 6..90. Without
+    # monotonic, some qualifying trains contain a step-down stage; monotonic removes those and
+    # keeps only all-step-up trains, all still honoring the input bound (first stage's driving
+    # gear in 18..20). Non-vacuous (a bounded mixed-direction train exists when monotonic off).
+    base = dict(target_num=12, target_den=1, min_stages=2, max_stages=2,
+                teeth_min=6, teeth_max=90, input_min=18, input_max=20)
+    off = gt.search(_valid_query(monotonic=False, **base))
+    on = gt.search(_valid_query(monotonic=True, **base))
+    assert not off.truncated and not on.truncated
+    assert any(any(s.driving < s.driven for s in t.stages) for t in off.trains), \
+        'expected a mixed-direction train among the bounded results when monotonic is off'
+    assert on.trains and len(on.trains) < len(off.trains)     # monotonic strictly pruned
+    for t in on.trains:
+        assert 18 <= t.stages[0].driving <= 20                 # input bound still honored
+        assert all(s.driving > s.driven for s in t.stages)     # all step-up
