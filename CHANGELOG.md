@@ -2,6 +2,62 @@
 
 <!-- version list -->
 
+## v1.12.0 (2026-07-19)
+
+### Bug Fixes
+
+- **engine**: Use proper-subset semantics in _is_irreducible
+  ([`89f0b48`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/89f0b4897b467131f0a344945440de95d407dfbe))
+
+- **fusion**: Stack gear-train option controls onto separate rows
+  ([`6dc0b43`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/6dc0b43dbe999fa01e164a69aadc2989fcf70866))
+
+### Documentation
+
+- Document irreducible trains and same-direction option
+  ([`730037d`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/730037d1770dc0e860ae31ef8f0c225d5039cdfa))
+
+- Restore v1.11.0 changelog entries dropped by PSR misbucketing [skip ci]
+  ([`84e2cac`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/84e2cacf36fbb035aa3a24aa5bee4d770d9ed51a))
+
+### Features
+
+- **engine**: Add _is_irreducible train-reducibility helper
+  ([`721ee8e`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/721ee8e473682280f79217e94cd501363e02a48f))
+
+- **engine**: Add monotonic (same-direction) stage filter
+  ([`b8d9bee`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/b8d9beee3e4cc93521e31db0f4f0e854079135e8))
+
+- **engine**: Add monotonic field to TrainQuery
+  ([`23ed171`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/23ed171c6e166a7db150cb9e1a6f312388773eb5))
+
+- **engine**: Reject reducible gear trains (irreducibility rule)
+  ([`5982cde`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/5982cdecfc8cdb72d486bbdd30db71942ef2893e))
+
+- **fusion**: Add same-direction-stages palette checkbox
+  ([`50b620f`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/50b620ff8ea943d8737c08ddc83a4d1f20096bf0))
+
+- **fusion**: Wire monotonic flag through palette bridge
+  ([`b791e06`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/b791e0616d4d1c72d5e038afc140494bcdd715c2))
+
+### Testing
+
+- **engine**: Cover step-down-monotonic+coaxial and R2+end-bounds interactions
+  ([`dd1d89a`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/dd1d89a79ac769ffc244a10224d6faac724e67b3))
+
+- **engine**: Extend brute-force parity guards for R1/R2
+  ([`ef8c289`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/ef8c2897543a1a97499ddae68465ac0cc1c6867f))
+
+- **engine**: Make monotonic-compose tests non-vacuous guards
+  ([`5c5519e`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/5c5519e4a671c91ab3dba0a9ee51172ec708d332))
+
+- **engine**: Make R1 no-reducible-trains test exercise search() end-to-end
+  ([`5360a2b`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/5360a2b9bccd390f9fd7ede457e1408c7ac01a5e))
+
+- **engine**: Remove duplicate grafted assertion from trimming test
+  ([`0a37b5b`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/0a37b5bc64d8aa7bd75b8d750c7a8a2eda5e13a6))
+
+
 ## v1.11.0 (2026-07-17)
 
 ### Documentation
