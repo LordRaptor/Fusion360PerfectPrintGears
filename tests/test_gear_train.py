@@ -48,6 +48,30 @@ def test_is_irreducible_three_stage_cancelling_subset_is_reducible():
     assert gt._is_irreducible(stages) is False
 
 
+def test_clearance_ok_single_stage_is_vacuously_true():
+    assert gt._clearance_ok((gt.Stage(12, 60),), 2) is True
+
+
+def test_clearance_ok_rejects_overreaching_wheel():
+    # driven 60 (pitch radius 30) next to a stage of tooth-sum 48 (center distance 24):
+    # 48 - 60 = -12 < g=2 -> the 60t wheel swallows the next arbor's shaft.
+    order = (gt.Stage(13, 60), gt.Stage(12, 36))
+    assert gt._clearance_ok(order, 2) is False
+
+
+def test_clearance_ok_accepts_when_neighbour_is_large_enough():
+    # driven 48 next to sum 73 (13+60): 73-48=25>=2 ; driving 13 vs sum 60 (12+48): 60-13=47
+    order = (gt.Stage(12, 48), gt.Stage(13, 60))
+    assert gt._clearance_ok(order, 2) is True
+
+
+def test_clearance_ok_tangent_passes_at_zero_fails_positive():
+    # driven 40 vs neighbour tooth-sum 40 -> gap exactly 0.
+    order = (gt.Stage(8, 40), gt.Stage(8, 32))
+    assert gt._clearance_ok(order, 0) is True
+    assert gt._clearance_ok(order, 1) is False
+
+
 def test_geartrain_ratio_is_product():
     train = gt.GearTrain(stages=(gt.Stage(36, 6), gt.Stage(40, 20)))
     assert train.ratio() == Fraction(12, 1)   # 6 * 2

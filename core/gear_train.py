@@ -184,6 +184,26 @@ def _is_irreducible(stages) -> bool:
     return True
 
 
+def _clearance_ok(order, clearance) -> bool:
+    """True iff, laid out input->output as `order` (a sequence of Stage), every wheel's
+    pitch radius clears the NON-meshing neighbouring arbor shaft by at least `clearance`
+    teeth of tooth-sum.
+
+    Derivation: the physical rule is wheel_radius + K < center_distance, i.e. N/2 + K < M/2,
+    i.e. M - N >= 2K. With g = 2K in tooth units, at each internal arbor A_i (between
+    order[i-1] and order[i]):
+        sum(order[i])   - driven(order[i-1])  >= g   # driven wheel clears the FAR arbor
+        sum(order[i-1]) - driving(order[i])   >= g   # driving wheel clears the NEAR arbor
+    End arbors carry a single gear (no opposite neighbour), so a large wheel there is free.
+    """
+    for i in range(1, len(order)):
+        if order[i].tooth_sum() - order[i - 1].driven < clearance:
+            return False
+        if order[i - 1].tooth_sum() - order[i].driving < clearance:
+            return False
+    return True
+
+
 def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
     """Enumerate exact `n`-stage trains; return (trains, truncated).
 
