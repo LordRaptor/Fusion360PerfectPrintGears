@@ -658,6 +658,19 @@ def test_trainquery_monotonic_can_be_set_and_is_valid():
     assert gt.validate(q) == []          # a plain bool needs no new validation rule
 
 
+def test_trainquery_clearance_defaults_to_two():
+    assert _valid_query().clearance == 2
+
+
+def test_validate_rejects_negative_clearance():
+    errs = gt.validate(_valid_query(clearance=-1))
+    assert any('clearance' in e.lower() for e in errs)
+
+
+def test_validate_accepts_zero_clearance():
+    assert gt.validate(_valid_query(clearance=0)) == []
+
+
 def _train_has_cancelling_subset(train):
     """Independent reducibility check for tests: True iff some non-empty proper subset of
     the train's stages has a Fraction ratio-product of exactly 1."""

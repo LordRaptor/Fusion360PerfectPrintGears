@@ -77,6 +77,12 @@ class TrainQuery:
     # always-on irreducibility rule. NOT the same as `direction` (which is rotation sense).
     monotonic: bool = False
 
+    # Single-plane buildability clearance, in TEETH (a dimensionless multiple of the
+    # module: g = 2*addendum + 2*shaft_radius/module + 2*safety). At each internal arbor a
+    # wheel must clear the NON-meshing neighbouring shaft by at least this many teeth of
+    # tooth-sum. Default 2 ~= one module of air. Always applied (see _clearance_ok).
+    clearance: int = 2
+
 
 def validate(q: TrainQuery) -> list:
     """Return a list of hard-error strings (empty == valid). Small teeth and the
@@ -110,6 +116,8 @@ def validate(q: TrainQuery) -> list:
         if lo < q.teeth_min or hi > q.teeth_max:
             errors.append(f'{name} gear bound must stay within the general tooth '
                           f'range ({q.teeth_min}-{q.teeth_max}).')
+    if q.clearance < 0:
+        errors.append('Clearance (teeth) must be 0 or greater.')
     return errors
 
 
