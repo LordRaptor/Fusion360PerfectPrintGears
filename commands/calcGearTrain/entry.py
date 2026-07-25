@@ -104,6 +104,7 @@ def palette_incoming(args: adsk.core.HTMLEventArgs):
             output_min=_opt_int(data.get('output_min')),
             output_max=_opt_int(data.get('output_max')),
             monotonic=bool(data.get('monotonic', False)),
+            clearance=int(data.get('clearance', 2)),
         )
         payload = json.dumps(gear_train.result_to_dict(gear_train.search(query)))
     except Exception:

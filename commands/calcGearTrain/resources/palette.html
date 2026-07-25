@@ -54,6 +54,8 @@
       <label class="opt-row"><input type="checkbox" id="coaxial"> Coaxial input/output</label>
       <label class="opt-row" title="No reduction stages in a step-up train, and no step-up stages in a reduction train. Removes mixed-direction trimming trains.">
         <input type="checkbox" id="monotonic"> Same-direction stages only</label>
+      <label class="opt-row" title="Minimum tooth-sum gap a wheel keeps from the next arbor's shaft, so results are buildable in one frame. ~2 = one module of clearance; raise for fat arbors or long cycloidal addenda.">
+        Clearance (teeth) <input type="number" id="clearance" min="0" value="2"></label>
     </fieldset>
 
     <button type="submit" id="search">Search</button>
