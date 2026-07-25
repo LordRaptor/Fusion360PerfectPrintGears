@@ -19,6 +19,10 @@ WORK_BUDGET = 600_000      # safety valve: max stage placements explored per lev
                            #   case; loose targets forced to high stage counts return partial,
                            #   truncation-flagged results rather than hanging -- narrow ranges)
 
+BUILDABILITY_EMPTY_WARNING = (
+    'No single-frame-buildable train found. Try raising the end-gear limit, adding a '
+    'stage, widening the tooth range, or lowering the clearance.')
+
 
 @dataclass(frozen=True)
 class Stage:
@@ -238,6 +242,7 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
     step_up = q.monotonic and target > 1     # every stage must be driving > driven
     step_down = q.monotonic and target < 1   # every stage must be driving < driven
     work = [0]                           # stage placements explored; bounded by work_budget
+    dropped = [0]                        # exact trains with no buildable arrangement
 
     def stop() -> bool:
         return ((limit is not None and len(out) >= limit) or
@@ -258,6 +263,8 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
                                               q.clearance)
                 if arranged is not None:
                     out.append(GearTrain(arranged))
+                else:
+                    dropped[0] += 1       # exact but not single-plane buildable
             return
         lo = Fraction(L, H) ** (k - 1)   # child ratio-range lower bound
         hi = Fraction(H, L) ** (k - 1)   # child ratio-range upper bound
@@ -296,7 +303,7 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
     recurse(target, n, (), None, (0, 0))
     truncated = ((limit is not None and len(out) >= limit) or
                  (work_budget is not None and work[0] >= work_budget))
-    return out, truncated
+    return out, truncated, dropped[0]
 
 
 def _generate(q: TrainQuery, n: int, limit=None, work_budget=None) -> list:
@@ -331,13 +338,15 @@ def search(q: TrainQuery) -> SearchResult:
     q, warnings = normalize(q)
     seen = {}
     truncated = False
+    dropped_total = 0
     for n in range(q.min_stages, q.max_stages + 1):
         if q.direction == 'same' and n % 2 != 0:
             continue
         if q.direction == 'opposite' and n % 2 == 0:
             continue
-        level, level_truncated = _enumerate(q, n, limit=GENERATE_LIMIT,
-                                             work_budget=WORK_BUDGET)
+        level, level_truncated, level_dropped = _enumerate(q, n, limit=GENERATE_LIMIT,
+                                                            work_budget=WORK_BUDGET)
+        dropped_total += level_dropped
         if level_truncated:
             truncated = True          # a safety valve tripped -> this level was cut short
         for train in level:
@@ -355,6 +364,8 @@ def search(q: TrainQuery) -> SearchResult:
     if len(trains) > MAX_RESULTS:
         truncated = True
         trains = trains[:MAX_RESULTS]
+    if not trains and dropped_total:
+        warnings.append(BUILDABILITY_EMPTY_WARNING)
     return SearchResult(trains=trains, truncated=truncated,
                         warnings=tuple(warnings), error=None)
 

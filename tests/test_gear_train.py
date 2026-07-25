@@ -240,6 +240,26 @@ def test_search_truncates_and_flags():
     assert len(res.trains) == gt.MAX_RESULTS
 
 
+def test_search_warns_when_buildability_empties_results():
+    # A clearance larger than any achievable tooth-sum gap makes every MULTI-stage train
+    # unbuildable; exact 2-stage solutions exist, so the result is empty WITH a warning.
+    q = _valid_query(target_num=12, target_den=1, min_stages=2, max_stages=2,
+                     teeth_min=6, teeth_max=90, clearance=1000)
+    res = gt.search(q)
+    assert res.trains == []
+    assert any('buildable' in w.lower() for w in res.warnings)
+
+
+def test_search_no_buildability_warning_when_no_exact_ratio():
+    # No exact train exists at all (nothing is dropped for buildability), so the buildability
+    # warning must NOT fire. 7:1 in one stage over 6..8 is impossible.
+    q = _valid_query(target_num=7, target_den=1, min_stages=1, max_stages=1,
+                     teeth_min=6, teeth_max=8)
+    res = gt.search(q)
+    assert res.trains == []
+    assert not any('buildable' in w.lower() for w in res.warnings)
+
+
 def test_search_empty_when_no_solution():
     # 7 : 1 with a prime 7 that cannot be formed from teeth 8..12 in one stage.
     q = _valid_query(target_num=7, target_den=1, min_stages=1, max_stages=1,
