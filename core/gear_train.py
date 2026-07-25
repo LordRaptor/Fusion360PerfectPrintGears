@@ -204,7 +204,9 @@ def _clearance_ok(order, clearance) -> bool:
 
 
 def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
-    """Enumerate exact `n`-stage trains; return (trains, truncated).
+    """Enumerate exact `n`-stage trains; return (trains, truncated, dropped).
+
+    `dropped` counts exact trains rejected for having no single-plane-buildable arrangement.
 
     All exact `n`-stage trains over [teeth_min, teeth_max], both directions.
     When q.coaxial is set, the first stage fixes the tooth sum S and every later stage
