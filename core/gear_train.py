@@ -136,31 +136,6 @@ def normalize(q: TrainQuery):
     return replace(q, min_stages=min_stages), warnings
 
 
-def _arrange_for_ends(stages, in_lo, in_hi, out_lo, out_hi):
-    """Reorder `stages` (a tuple/sequence of Stage) as input-first ... output-last so the
-    first stage's DRIVING gear lies in [in_lo, in_hi] and the last stage's DRIVEN gear lies
-    in [out_lo, out_hi]. Return the reordered tuple, or None if no such arrangement exists.
-
-    A single stage cannot be both the input arbor and the output arbor, so for >= 2 stages
-    the input and output stages must sit at DIFFERENT positions. Middle stages keep their
-    (canonical) order. Duplicate identical stages are distinct positions, so they qualify.
-    """
-    n = len(stages)
-    if n == 1:
-        s = stages[0]
-        if in_lo <= s.driving <= in_hi and out_lo <= s.driven <= out_hi:
-            return tuple(stages)
-        return None
-    in_idx = [k for k, s in enumerate(stages) if in_lo <= s.driving <= in_hi]
-    out_idx = [k for k, s in enumerate(stages) if out_lo <= s.driven <= out_hi]
-    for i in in_idx:
-        for j in out_idx:
-            if i != j:
-                middle = [stages[k] for k in range(n) if k != i and k != j]
-                return (stages[i],) + tuple(middle) + (stages[j],)
-    return None
-
-
 def _arrange_buildable(stages, in_lo, in_hi, out_lo, out_hi, clearance):
     """Return an ordering of `stages` (input-first ... output-last) whose first DRIVING
     gear lies in [in_lo, in_hi], last DRIVEN gear lies in [out_lo, out_hi], AND which
@@ -257,11 +232,6 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
     in_hi = q.input_max if q.input_max is not None else H
     out_lo = q.output_min if q.output_min is not None else L
     out_hi = q.output_max if q.output_max is not None else H
-    # Apply end-gear filtering/ordering if ANY bound field is set. validate() guarantees
-    # complete pairs via search(); keying on all four (not just the mins) also makes a
-    # direct _enumerate() call honour a lone max instead of silently dropping it.
-    bounded = any(v is not None for v in
-                  (q.input_min, q.input_max, q.output_min, q.output_max))
     target = Fraction(q.target_num, q.target_den)
     # R2 (monotonic): when set, tighten every stage to the target's speed direction.
     # target != 1 is guaranteed by validate() (1:1 targets are rejected).
@@ -280,12 +250,14 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
             if remaining == 1:
                 if not q.monotonic and not _is_irreducible(stages):
                     return                    # reducible -> drop, do not count
-                if bounded:
-                    arranged = _arrange_for_ends(stages, in_lo, in_hi, out_lo, out_hi)
-                    if arranged is not None:
-                        out.append(GearTrain(arranged))
-                else:
-                    out.append(GearTrain(stages))
+                # Always-on single-plane buildability: keep the train only if some ordering
+                # satisfies the end-gear bounds AND the clearance rule; store it in that
+                # order (input -> output). in_lo..out_hi default to the full range when no
+                # end bounds are set, so this also picks a buildable display order.
+                arranged = _arrange_buildable(stages, in_lo, in_hi, out_lo, out_hi,
+                                              q.clearance)
+                if arranged is not None:
+                    out.append(GearTrain(arranged))
             return
         lo = Fraction(L, H) ** (k - 1)   # child ratio-range lower bound
         hi = Fraction(H, L) ** (k - 1)   # child ratio-range upper bound

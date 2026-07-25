@@ -353,6 +353,22 @@ def _combo_is_monotonic(combo, target):
     return all(s.driving < s.driven for s in combo)
 
 
+def _combo_admits_buildable(combo, in_lo, in_hi, out_lo, out_hi, clearance):
+    """Reference (independent of the engine): True iff some ordering of `combo` puts a
+    driving gear in the input range first, a different-position driven gear in the output
+    range last, AND satisfies the single-plane clearance rule."""
+    for order in itertools.permutations(combo):
+        if not (in_lo <= order[0].driving <= in_hi):
+            continue
+        if not (out_lo <= order[-1].driven <= out_hi):
+            continue
+        if all(order[i].tooth_sum() - order[i - 1].driven >= clearance and
+               order[i - 1].tooth_sum() - order[i].driving >= clearance
+               for i in range(1, len(order))):
+            return True
+    return False
+
+
 def _brute_force_keys(q):
     """Obvious O(range^(2n)) reference: enumerate every stage combination, keep exact
     matches (respecting direction parity + coaxial), return their canonical keys."""
@@ -381,6 +397,8 @@ def _brute_force_keys(q):
                     continue
             elif not _combo_is_irreducible(combo):
                 continue
+            if not _combo_admits_buildable(combo, L, H, L, H, qn.clearance):
+                continue
             keys.add(tuple(sorted((s.driving, s.driven) for s in combo)))
     return keys
 
@@ -388,6 +406,36 @@ def _brute_force_keys(q):
 def _search_keys(q):
     return {tuple(sorted((s.driving, s.driven) for s in t.stages))
             for t in gt.search(q).trains}
+
+
+def test_search_every_returned_train_is_buildable():
+    q = _valid_query(target_num=1, target_den=60, min_stages=1, max_stages=4,
+                     teeth_min=8, teeth_max=90)
+    res = gt.search(q)
+    assert res.trains
+    for t in res.trains:
+        assert gt._clearance_ok(t.stages, q.clearance)
+
+
+def test_search_coaxial_trains_stay_valid_under_buildability():
+    q = _valid_query(target_num=1, target_den=60, min_stages=2, max_stages=4,
+                     teeth_min=8, teeth_max=90, coaxial=True)
+    res = gt.search(q)
+    assert res.trains, 'coaxial trains are always buildable'
+    for t in res.trains:
+        assert gt._clearance_ok(t.stages, q.clearance)
+
+
+def test_search_higher_clearance_is_a_subset():
+    # Verified: 2:1 over 6..20 (2 stages) yields 88 buildable trains at clearance 0 and 84 at
+    # clearance 4 -- untruncated, a genuine strict subset. (12:1 does NOT work: its trains all
+    # have large tooth-sum gaps so clearance 4 removes nothing, and the set also truncates.)
+    base = dict(target_num=2, target_den=1, min_stages=2, max_stages=2,
+                teeth_min=6, teeth_max=20)
+    loose = _search_keys(_valid_query(clearance=0, **base))
+    tight = _search_keys(_valid_query(clearance=4, **base))
+    assert tight <= loose            # tightening never adds trains
+    assert tight != loose            # and it removes at least one near-tangent train
 
 
 def test_pruned_search_matches_brute_force_small():
@@ -526,37 +574,6 @@ def test_validate_explicit_none_end_bounds_is_clean():
                                     output_min=None, output_max=None)) == []
 
 
-def test_arrange_single_stage_needs_both_ends_on_one_stage():
-    stages = (gt.Stage(8, 40),)
-    # input gear 8 in [6,10] and output gear 40 in [30,50] -> keep
-    assert gt._arrange_for_ends(stages, 6, 10, 30, 50) == stages
-    # output gear 40 not in [50,60] -> no arrangement
-    assert gt._arrange_for_ends(stages, 6, 10, 50, 60) is None
-
-
-def test_arrange_two_stage_orders_input_first_output_last():
-    stages = (gt.Stage(8, 24), gt.Stage(30, 72))
-    arranged = gt._arrange_for_ends(stages, 6, 10, 60, 80)   # input 8, output 72
-    assert arranged is not None
-    assert arranged[0].driving == 8      # input arbor is first
-    assert arranged[-1].driven == 72     # output arbor is last
-
-
-def test_arrange_two_stage_rejects_when_only_one_stage_serves_both_ends():
-    # stage 0 is the ONLY input-qualifier (driving 8 in [6,10]) AND the ONLY
-    # output-qualifier (driven 40 in [38,42]); one stage cannot be both arbors -> None.
-    stages = (gt.Stage(8, 40), gt.Stage(30, 20))
-    assert gt._arrange_for_ends(stages, 6, 10, 38, 42) is None
-
-
-def test_arrange_duplicate_qualifying_stages_pass():
-    # Two identical qualifying stages are distinct POSITIONS, so a valid i != j exists.
-    stages = (gt.Stage(8, 40), gt.Stage(8, 40))
-    arranged = gt._arrange_for_ends(stages, 6, 10, 38, 42)
-    assert arranged is not None
-    assert arranged[0].driving == 8 and arranged[-1].driven == 40
-
-
 def test_arrange_buildable_single_stage_needs_both_ends():
     stages = (gt.Stage(8, 40),)
     assert gt._arrange_buildable(stages, 6, 10, 30, 50, 2) == stages
@@ -595,12 +612,12 @@ def test_arrange_buildable_end_cap_blocks_the_only_clearing_order():
 
 def test_search_input_bound_orders_first_stage_driving():
     q = _valid_query(target_num=12, target_den=1, min_stages=2, max_stages=2,
-                     teeth_min=6, teeth_max=90, input_min=18, input_max=20)
+                     teeth_min=6, teeth_max=90, input_min=81, input_max=83)
     res = gt.search(q)
     assert res.error is None
-    assert res.trains, 'expected trains with an input gear in 18..20'
+    assert res.trains, 'expected trains with an input gear in 81..83'
     for t in res.trains:
-        assert 18 <= t.stages[0].driving <= 20     # input arbor within bound AND first
+        assert 81 <= t.stages[0].driving <= 83     # input arbor within bound AND first
 
 
 def test_search_output_bound_orders_last_stage_driven():
@@ -622,26 +639,25 @@ def test_search_bounds_equal_to_general_range_keys_are_a_noop():
     assert bounded == plain
 
 
-def test_search_no_bounds_keeps_canonical_stage_order():
-    # The disabled (None) path must NOT reorder stages: each train's stored stages stay in
-    # canonical non-decreasing (driving, driven) order. Uses 3 stages so a reorder bug
-    # would actually show (with 2 stages the arranged tuple equals the canonical one).
+def test_search_no_bounds_returns_buildable_order():
+    # Buildability is always on, so with no end bounds each train is stored in a single-plane
+    # buildable order (NOT necessarily canonical). Uses 3 stages so ordering is meaningful.
     q = _valid_query(target_num=12, target_den=1, min_stages=3, max_stages=3,
                      teeth_min=6, teeth_max=40)
     res = gt.search(q)
     assert res.trains, 'expected 3-stage solutions'
     for t in res.trains:
-        pairs = [(s.driving, s.driven) for s in t.stages]
-        assert pairs == sorted(pairs), 'no-bounds path must keep canonical order'
+        assert gt._clearance_ok(t.stages, q.clearance), 'stored order must be buildable'
 
 
 def _brute_force_keys_bounded(q):
     """Reference like _brute_force_keys, but also honours the optional end-gear bounds.
 
-    Uses its OWN arrangement check (deliberately NOT gear_train._arrange_for_ends) so this
-    test verifies the pruned enumeration's COMPLETENESS independently of the implementation
-    it is checking. A combo counts iff some ordering puts a driving gear in the input range
-    first and a DIFFERENT driven gear in the output range last (1-stage: one stage does both).
+    Uses its OWN arrangement check (_combo_admits_buildable, deliberately NOT
+    gear_train._arrange_buildable) so this test verifies the pruned enumeration's
+    COMPLETENESS independently of the implementation it is checking. A combo counts iff some
+    ordering puts a driving gear in the input range first, a DIFFERENT driven gear in the
+    output range last, AND satisfies the single-plane clearance rule.
     """
     L, H = q.teeth_min, q.teeth_max
     in_lo = q.input_min if q.input_min is not None else L
@@ -651,13 +667,6 @@ def _brute_force_keys_bounded(q):
     target = Fraction(q.target_num, q.target_den)
     all_stages = [gt.Stage(a, b) for a in range(L, H + 1) for b in range(L, H + 1)
                   if a != b]                       # 1:1 stages are excluded by the solver
-
-    def admits(combo):
-        in_ok = [k for k, s in enumerate(combo) if in_lo <= s.driving <= in_hi]
-        out_ok = [k for k, s in enumerate(combo) if out_lo <= s.driven <= out_hi]
-        if len(combo) == 1:
-            return bool(in_ok) and bool(out_ok)     # one stage must satisfy both ends
-        return any(i != j for i in in_ok for j in out_ok)
 
     keys = set()
     qn, _ = gt.normalize(q)
@@ -679,20 +688,20 @@ def _brute_force_keys_bounded(q):
                     continue
             elif not _combo_is_irreducible(combo):
                 continue
-            if admits(combo):
+            if _combo_admits_buildable(combo, in_lo, in_hi, out_lo, out_hi, qn.clearance):
                 keys.add(tuple(sorted((s.driving, s.driven) for s in combo)))
     return keys
 
 
 def test_pruned_search_matches_brute_force_with_end_bounds():
     q = _valid_query(target_num=12, target_den=1, min_stages=2, max_stages=2,
-                     teeth_min=6, teeth_max=24, input_min=18, input_max=20)
+                     teeth_min=6, teeth_max=28, input_min=18, input_max=24)
     bounded = _search_keys(q)
     assert bounded, 'expected some qualifying trains'
     assert bounded == _brute_force_keys_bounded(q)
-    # genuine narrowing: some unbounded trains have every stage's driving > 20
+    # genuine narrowing: some unbounded trains have every stage's driving > 24
     open_keys = _search_keys(_valid_query(target_num=12, target_den=1, min_stages=2,
-                                          max_stages=2, teeth_min=6, teeth_max=24))
+                                          max_stages=2, teeth_min=6, teeth_max=28))
     assert bounded < open_keys
 
 
@@ -902,12 +911,12 @@ def test_monotonic_composes_with_coaxial_stepdown():
 
 
 def test_monotonic_composes_with_end_gear_bounds():
-    # R2 + end-gear bounds: 12:1 with the input gear bounded to 18..20 over 6..90. Without
+    # R2 + end-gear bounds: 12:1 with the input gear bounded to 81..83 over 6..90. Without
     # monotonic, some qualifying trains contain a step-down stage; monotonic removes those and
     # keeps only all-step-up trains, all still honoring the input bound (first stage's driving
-    # gear in 18..20). Non-vacuous (a bounded mixed-direction train exists when monotonic off).
+    # gear in 81..83). Non-vacuous (a bounded mixed-direction train exists when monotonic off).
     base = dict(target_num=12, target_den=1, min_stages=2, max_stages=2,
-                teeth_min=6, teeth_max=90, input_min=18, input_max=20)
+                teeth_min=6, teeth_max=90, input_min=81, input_max=83)
     off = gt.search(_valid_query(monotonic=False, **base))
     on = gt.search(_valid_query(monotonic=True, **base))
     assert not off.truncated and not on.truncated
@@ -915,5 +924,5 @@ def test_monotonic_composes_with_end_gear_bounds():
         'expected a mixed-direction train among the bounded results when monotonic is off'
     assert on.trains and len(on.trains) < len(off.trains)     # monotonic strictly pruned
     for t in on.trains:
-        assert 18 <= t.stages[0].driving <= 20                 # input bound still honored
+        assert 81 <= t.stages[0].driving <= 83                 # input bound still honored
         assert all(s.driving > s.driven for s in t.stages)     # all step-up
