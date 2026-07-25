@@ -116,6 +116,11 @@ the output direction, add a 1:1 idler gear yourself. Options:
   (both min and max are required when checked). Useful when the end gears sit in tighter
   spots than the middle gears. When a bound is set, each result's stages are listed in
   **input → output** order so you can read off which gear is which.
+- **Single-plane buildable (always on):** results only include trains you can build in one
+  frame — every wheel clears its non-meshing neighbouring arbor shaft. Each train is shown
+  in a buildable input→output order. The **Clearance (teeth)** input (default 2, ≈ one
+  module of air) tunes how much room each wheel must keep; raise it for fat arbors or long
+  cycloidal addenda. Trains that would need intermediate plates are excluded.
 
 Results list each train's stages (`driving ÷ driven` tooth counts), the exact achieved ratio
 (shown `input : output` to match the target you entered), gear count, rotation direction, and
