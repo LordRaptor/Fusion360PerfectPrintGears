@@ -557,6 +557,42 @@ def test_arrange_duplicate_qualifying_stages_pass():
     assert arranged[0].driving == 8 and arranged[-1].driven == 40
 
 
+def test_arrange_buildable_single_stage_needs_both_ends():
+    stages = (gt.Stage(8, 40),)
+    assert gt._arrange_buildable(stages, 6, 10, 30, 50, 2) == stages
+    assert gt._arrange_buildable(stages, 6, 10, 50, 60, 2) is None
+
+
+def test_arrange_buildable_orders_input_first_output_last():
+    stages = (gt.Stage(8, 24), gt.Stage(30, 72))
+    arranged = gt._arrange_buildable(stages, 6, 10, 60, 80, 0)   # input 8, output 72
+    assert arranged is not None
+    assert arranged[0].driving == 8 and arranged[-1].driven == 72
+
+
+def test_arrange_buildable_rejects_when_one_stage_serves_both_ends():
+    stages = (gt.Stage(8, 40), gt.Stage(30, 20))
+    assert gt._arrange_buildable(stages, 6, 10, 38, 42, 0) is None
+
+
+def test_arrange_buildable_duplicate_qualifying_stages_pass():
+    stages = (gt.Stage(8, 40), gt.Stage(8, 40))
+    arranged = gt._arrange_buildable(stages, 6, 10, 38, 42, 0)
+    assert arranged is not None
+    assert arranged[0].driving == 8 and arranged[-1].driven == 40
+
+
+def test_arrange_buildable_end_cap_blocks_the_only_clearing_order():
+    # The user's real train: with output <= 44 the 60t cannot go to the output, and no
+    # other stage's tooth-sum exceeds 60 by 2, so NO ordering is buildable.
+    stages = (gt.Stage(12, 13), gt.Stage(12, 48), gt.Stage(13, 60), gt.Stage(12, 36))
+    assert gt._arrange_buildable(stages, 8, 44, 8, 44, 2) is None
+    # Without the end cap, an ordering exists (the 60t sits at the output).
+    arranged = gt._arrange_buildable(stages, 8, 90, 8, 90, 2)
+    assert arranged is not None
+    assert gt._clearance_ok(arranged, 2)
+
+
 def test_search_input_bound_orders_first_stage_driving():
     q = _valid_query(target_num=12, target_den=1, min_stages=2, max_stages=2,
                      teeth_min=6, teeth_max=90, input_min=18, input_max=20)

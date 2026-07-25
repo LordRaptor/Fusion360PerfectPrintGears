@@ -8,7 +8,7 @@ its stage ratios. See docs/superpowers/specs/2026-06-28-gear-train-calculator-de
 from __future__ import annotations
 
 import math
-from itertools import combinations
+from itertools import combinations, permutations
 from dataclasses import dataclass, field, replace
 from fractions import Fraction
 
@@ -158,6 +158,26 @@ def _arrange_for_ends(stages, in_lo, in_hi, out_lo, out_hi):
             if i != j:
                 middle = [stages[k] for k in range(n) if k != i and k != j]
                 return (stages[i],) + tuple(middle) + (stages[j],)
+    return None
+
+
+def _arrange_buildable(stages, in_lo, in_hi, out_lo, out_hi, clearance):
+    """Return an ordering of `stages` (input-first ... output-last) whose first DRIVING
+    gear lies in [in_lo, in_hi], last DRIVEN gear lies in [out_lo, out_hi], AND which
+    satisfies the single-plane clearance rule (see _clearance_ok). Return None if none.
+
+    A train is an unordered multiset of stages, so this searches permutations; stage counts
+    are tiny. This unifies the end-gear-bounds arrangement and buildability into one test.
+    When no end bounds are set the caller passes the full tooth range, so only clearance
+    constrains the ordering.
+    """
+    for order in permutations(stages):
+        if not (in_lo <= order[0].driving <= in_hi):
+            continue
+        if not (out_lo <= order[-1].driven <= out_hi):
+            continue
+        if _clearance_ok(order, clearance):
+            return order
     return None
 
 
