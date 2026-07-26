@@ -946,3 +946,28 @@ def test_monotonic_composes_with_end_gear_bounds():
     for t in on.trains:
         assert 81 <= t.stages[0].driving <= 83                 # input bound still honored
         assert all(s.driving > s.driven for s in t.stages)     # all step-up
+
+
+def test_spread_is_a_permutation():
+    items = list(range(10))
+    assert sorted(gt._spread(items)) == items
+
+
+def test_spread_handles_tiny_lists():
+    assert gt._spread([]) == []
+    assert gt._spread([7]) == [7]
+    assert gt._spread([7, 8]) == [7, 8]
+
+
+def test_spread_is_deterministic():
+    items = list(range(100))
+    assert gt._spread(items) == gt._spread(items)
+
+
+def test_spread_prefix_covers_the_whole_range():
+    # The point of the reordering: a short PREFIX must reach the far end of the list, which
+    # ascending order never does. With 100 items, the first 8 spread out instead of being 0..7.
+    order = gt._spread(list(range(100)))
+    prefix = order[:8]
+    assert max(prefix) > 50, f'prefix stayed in the low corner: {prefix}'
+    assert len({p // 25 for p in prefix}) >= 3, f'prefix did not cover quarters: {prefix}'

@@ -203,6 +203,28 @@ def _clearance_ok(order, clearance) -> bool:
     return True
 
 
+def _spread(items) -> list:
+    """Return `items` reordered so that any PREFIX samples the whole list evenly.
+
+    Bit-reversal (van der Corput) order: index i of the output is the input index whose
+    bit pattern is i reversed. Deterministic -- no RNG -- so searches stay reproducible.
+
+    Used to pick the order in which _enumerate visits first stages. Ascending (a, b) order
+    spends the whole work budget in the small-gear corner and never reaches the large-driven
+    first stages that deep reductions need; a low-discrepancy order reaches them immediately.
+    """
+    n = len(items)
+    if n < 3:
+        return list(items)
+    bits = (n - 1).bit_length()
+    order = []
+    for i in range(1 << bits):
+        r = int(format(i, '0%db' % bits)[::-1], 2)
+        if r < n:
+            order.append(items[r])
+    return order
+
+
 def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
     """Enumerate exact `n`-stage trains; return (trains, truncated, dropped).
 
