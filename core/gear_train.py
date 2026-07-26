@@ -33,6 +33,9 @@ FIRST_STAGE_SLICE = 2000   # budget-fair exploration: starting per-first-stage w
                            #   regression test finds nothing again). Retuning it must be
                            #   validated by sweeping the value, not just by running the suite.
 
+MAX_PER_FIRST_STAGE = 5    # display-only: at most this many results share one input-stage gear
+                           #   pair before the rest are demoted to the tail (see _diverse)
+
 
 def _work_budget(q: TrainQuery) -> int:
     """Work budget for `q`, scaled by how big its search space is.
@@ -477,6 +480,30 @@ def _collect(q: TrainQuery, seen: dict, cap: int):
     return truncated, dropped_total
 
 
+def _diverse(trains: list, per_first: int, cap: int) -> list:
+    """Reorder `trains` so at most `per_first` share one displayed first stage at the head,
+    then truncate to `cap`. Display-only -- never called from _enumerate, so the enumerated
+    pool the completeness tests compare against is untouched.
+
+    Over-quota trains are DEMOTED to the tail, not dropped: below `cap` every train is still
+    returned (just reordered), and at `cap` the tail is backfilled with the most compact
+    leftovers rather than leaving slots empty. `trains` must already be sorted by _sort_key,
+    so the head is the most compact train of each distinct first stage.
+
+    The key is the DISPLAYED first stage -- each train is stored in buildable input->output
+    order, so stages[0] is the input arbor's mesh, which is what visibly repeats.
+    """
+    kept, overflow, counts = [], [], {}
+    for train in trains:
+        key = (train.stages[0].driving, train.stages[0].driven)
+        if counts.get(key, 0) < per_first:
+            counts[key] = counts.get(key, 0) + 1
+            kept.append(train)
+        else:
+            overflow.append(train)
+    return (kept + overflow)[:cap]
+
+
 def search(q: TrainQuery) -> SearchResult:
     """Validate -> normalize -> generate across the stage-count range -> dedup -> order
     -> cap. Fewest stages first, then most compact (smallest total tooth count)."""
@@ -507,8 +534,8 @@ def search(q: TrainQuery) -> SearchResult:
 
     trains = sorted(seen.values(), key=_sort_key)
     if len(trains) > MAX_RESULTS:
-        truncated = True
-        trains = trains[:MAX_RESULTS]
+        truncated = True          # the POOL overflowed -- the diversity cap below never sets this
+    trains = _diverse(trains, MAX_PER_FIRST_STAGE, MAX_RESULTS)
     if not trains and dropped_total:
         warnings.append(BUILDABILITY_EMPTY_WARNING)
     return SearchResult(trains=trains, truncated=truncated,

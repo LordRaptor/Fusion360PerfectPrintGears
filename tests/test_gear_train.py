@@ -1075,3 +1075,54 @@ def test_search_finds_the_reported_deep_reduction_train():
     res = gt.search(_repro_query())
     keys = {tuple(sorted((s.driving, s.driven) for s in t.stages)) for t in res.trains}
     assert ((12, 56), (17, 51), (17, 51), (28, 40)) in keys
+
+
+def _first_stage_counts(trains):
+    counts = {}
+    for t in trains:
+        key = (t.stages[0].driving, t.stages[0].driven)
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def test_diverse_demotes_over_quota_trains_instead_of_dropping_them():
+    # Unit test on the helper. Six trains share first stage (10,20) and one has (30,15).
+    # With per_first=2, the four over-quota (10,20) trains move to the TAIL -- the list keeps
+    # all seven, it is only reordered.
+    clones = [gt.GearTrain((gt.Stage(10, 20), gt.Stage(30, 15 + i))) for i in range(6)]
+    other = gt.GearTrain((gt.Stage(30, 15), gt.Stage(10, 20)))
+    result = gt._diverse(clones + [other], per_first=2, cap=100)
+    assert len(result) == 7, 'nothing may be dropped below the cap'
+    assert result[2] is other, 'the distinct first stage must be promoted past the clones'
+    assert result[:2] == clones[:2]
+
+
+def test_diverse_truncates_to_the_cap():
+    clones = [gt.GearTrain((gt.Stage(10, 20), gt.Stage(30, 15 + i))) for i in range(10)]
+    assert len(gt._diverse(clones, per_first=3, cap=4)) == 4
+
+
+def test_search_caps_results_per_first_stage():
+    # The palette's first-use default fills the 200-cap. Before the diversity cap, 9 results
+    # shared one displayed first stage across 115 distinct ones; after, at most 5.
+    q = _valid_query(target_num=12, target_den=1, min_stages=1, max_stages=3,
+                     teeth_min=8, teeth_max=90)
+    res = gt.search(q)
+    assert len(res.trains) == gt.MAX_RESULTS
+    counts = _first_stage_counts(res.trains)
+    assert max(counts.values()) <= gt.MAX_PER_FIRST_STAGE
+    assert len(counts) >= 100, 'expected the results to span many distinct first stages'
+
+
+def test_diversity_cap_keeps_every_train_when_under_the_result_cap():
+    # The cap DEMOTES, it never deletes: with a pool smaller than MAX_RESULTS every train is
+    # still returned. Verified: 2:1 over 6..12 up to 3 stages yields exactly 44 trains, 8 of
+    # which share one first stage -- more than MAX_PER_FIRST_STAGE, and all 8 must survive.
+    # This is also the guard that the display cap never shrinks the pool the parity tests
+    # compare against.
+    q = _valid_query(target_num=2, target_den=1, min_stages=1, max_stages=3,
+                     teeth_min=6, teeth_max=12)
+    res = gt.search(q)
+    assert len(res.trains) == 44
+    assert max(_first_stage_counts(res.trains).values()) > gt.MAX_PER_FIRST_STAGE
+    assert not res.truncated, 'the diversity cap must never flag truncation'
