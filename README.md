@@ -116,16 +116,33 @@ the output direction, add a 1:1 idler gear yourself. Options:
   (both min and max are required when checked). Useful when the end gears sit in tighter
   spots than the middle gears. When a bound is set, each result's stages are listed in
   **input → output** order so you can read off which gear is which.
+- **Single-plane buildable (always on):** results only include trains you can build in one
+  frame — every wheel clears its non-meshing neighbouring arbor shaft. Each train is shown
+  in a buildable input→output order. The **Clearance (teeth)** input (default 2, ≈ one
+  module of air) tunes how much room each wheel must keep; raise it for fat arbors or long
+  cycloidal addenda. Trains that would need intermediate plates are excluded.
 
 Results list each train's stages (`driving ÷ driven` tooth counts), the exact achieved ratio
 (shown `input : output` to match the target you entered), gear count, rotation direction, and
 per-stage tooth sum. Following Steve Peterson's convention, the tooth
 sum (∝ center distance) helps you judge gear sizes when picking a solution. Results are exact
-by construction and ordered fewest-stages-then-most-compact, capped at 200. Gear-train ratio
-search is combinatorially large, so for loose targets over wide ranges the search is bounded
-for responsiveness and returns a **partial** list (flagged in the palette) — narrow the tooth
-range or stage count for a complete result. You read a result and set up the gears yourself
-(e.g. with the generator command).
+by construction and ordered fewest-stages-then-most-compact, capped at 200. To keep that list
+useful rather than 200 variations on one layout, at most **five** results share the same input
+gear pair before the rest are moved to the end — nothing is discarded, the variety just comes
+first. When a search comes back with few results it is automatically topped up with any coaxial
+trains it can find, so turning **Coaxial input/output** on can never surface a train the general
+search missed.
+
+Tooth counts are limited to **6–150**: below 6 a cycloidal pinion cannot practically be made,
+and beyond 150 the search space grows faster than it can be explored. There is no limit on the
+ratio or the stage count — instead, because one stage can change speed by at most
+`teeth_max ÷ teeth_min`, a target that no stage count in your range could reach is rejected
+straight away and tells you how many stages it would need (e.g. *"A 3600x speed change is not
+reachable in 2 stages with teeth 8-150 … It needs at least 3 stages."*). Gear-train ratio search
+is combinatorially large, so for loose targets over wide ranges the search is still bounded for
+responsiveness and returns a **partial** list (flagged in the palette) — narrow the tooth range
+or stage count for a complete result. You read a result and set up the gears yourself (e.g. with
+the generator command).
 
 ---
 

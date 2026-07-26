@@ -8,16 +8,57 @@ its stage ratios. See docs/superpowers/specs/2026-06-28-gear-train-calculator-de
 from __future__ import annotations
 
 import math
-from itertools import combinations
+from itertools import combinations, permutations
 from dataclasses import dataclass, field, replace
 from fractions import Fraction
 
 MAX_RESULTS = 200          # hard cap on returned trains; truncation is reported, never silent
-MIN_TEETH_WARN = 6         # cycloidal pinions below this are hard to print/cut (warning only)
+MIN_TEETH = 6              # hard floor: a cycloidal pinion below this cannot be cut or printed,
+                           #   and the generator command refuses to build one either
+MAX_TEETH = 150            # hard ceiling: the search space grows ~quadratically with the tooth
+                           #   span, and at this span a worst-case search already takes ~13s
+                           #   (the palette blocks for the whole search)
 GENERATE_LIMIT = 20000     # safety valve: max trains materialized per stage level (see _generate)
 WORK_BUDGET = 600_000      # safety valve: max stage placements explored per level (~4s worst
                            #   case; loose targets forced to high stage counts return partial,
                            #   truncation-flagged results rather than hanging -- narrow ranges)
+
+REFERENCE_SPAN = 80          # tooth-range span WORK_BUDGET was tuned against (e.g. teeth 8-90)
+MAX_WORK_BUDGET = 3_000_000  # ceiling on the scaled budget, so the palette stays responsive
+
+FIRST_STAGE_SLICE = 2000   # budget-fair exploration: starting per-first-stage work allowance.
+                           #   Each distinct first stage gets this many placements, then the
+                           #   allowance doubles and the cut-short ones are revisited, until the
+                           #   space is exhausted or the work budget is spent. Stops one
+                           #   small-gear prefix from draining the whole budget (see _enumerate).
+                           #   LOAD-BEARING and non-monotonic: a LARGER slice reaches FEWER
+                           #   first stages before the budget runs out, which reproduces the very
+                           #   starvation this fixes (measured: at 20000 the deep-reduction
+                           #   regression test finds nothing again). Retuning it must be
+                           #   validated by sweeping the value, not just by running the suite.
+
+MAX_PER_FIRST_STAGE = 5    # display-only: at most this many results share one input-stage gear
+                           #   pair before the rest are demoted to the tail (see _diverse)
+
+
+def _work_budget(q: TrainQuery) -> int:
+    """Work budget for `q`, scaled by how big its search space is.
+
+    The number of candidate first stages grows ~quadratically with the tooth-range span, so a
+    fixed budget explores a vanishing fraction of a wide range: budget-fair exploration then
+    hands every first stage a slice too thin to reach any leaf, and the search comes back empty.
+    Scale with the span, capped by MAX_WORK_BUDGET for responsiveness. A span at or below
+    REFERENCE_SPAN keeps exactly WORK_BUDGET, so narrow queries -- including every completeness
+    parity test -- are bit-for-bit unaffected.
+    """
+    span = q.teeth_max - q.teeth_min + 1
+    scale = max(1.0, (span / REFERENCE_SPAN) ** 2)
+    return min(MAX_WORK_BUDGET, int(WORK_BUDGET * scale))
+
+
+BUILDABILITY_EMPTY_WARNING = (
+    'No single-frame-buildable train found. Try raising the end-gear limit, adding a '
+    'stage, widening the tooth range, or lowering the clearance.')
 
 
 @dataclass(frozen=True)
@@ -77,10 +118,27 @@ class TrainQuery:
     # always-on irreducibility rule. NOT the same as `direction` (which is rotation sense).
     monotonic: bool = False
 
+    # Single-plane buildability clearance, in TEETH (a dimensionless multiple of the
+    # module: g = 2*addendum + 2*shaft_radius/module + 2*safety). At each internal arbor a
+    # wheel must clear the NON-meshing neighbouring shaft by at least this many teeth of
+    # tooth-sum. Default 2 ~= one module of air. Always applied (see _clearance_ok).
+    clearance: int = 2
+
+
+def _searchable_stage_counts(q: TrainQuery) -> list:
+    """The stage counts search() will actually try: the requested range, raised to 2 when
+    coaxial (as normalize() does), then filtered by rotation parity -- every external mesh
+    reverses rotation, so 'same' admits only even counts and 'opposite' only odd ones.
+    """
+    lo = max(q.min_stages, 2 if q.coaxial else 1)
+    return [n for n in range(lo, q.max_stages + 1)
+            if not (q.direction == 'same' and n % 2)
+            and not (q.direction == 'opposite' and n % 2 == 0)]
+
 
 def validate(q: TrainQuery) -> list:
-    """Return a list of hard-error strings (empty == valid). Small teeth and the
-    coaxial min-stage bump are WARNINGS handled in normalize(), not errors here."""
+    """Return a list of hard-error strings (empty == valid). The coaxial min-stage bump is
+    a WARNING handled in normalize(), not an error here."""
     errors = []
     if q.target_num <= 0 or q.target_den <= 0:
         errors.append('Target ratio P and Q must both be positive integers.')
@@ -88,8 +146,12 @@ def validate(q: TrainQuery) -> list:
         errors.append('Target ratio must not be 1:1 — a pass-through train serves '
                       'no purpose. Add a 1:1 idler manually if you only need to '
                       'reverse direction.')
-    if q.teeth_min < 1:
-        errors.append('Minimum tooth count must be at least 1.')
+    if q.teeth_min < MIN_TEETH:
+        errors.append(f'Minimum tooth count must be at least {MIN_TEETH}: a cycloidal pinion '
+                      f'below that cannot be cut or printed.')
+    if q.teeth_max > MAX_TEETH:
+        errors.append(f'Maximum tooth count must be at most {MAX_TEETH}: the search space '
+                      f'grows faster than it can be explored beyond that.')
     if q.teeth_max < q.teeth_min:
         errors.append('Maximum tooth count must be >= minimum tooth count.')
     if q.min_stages < 1:
@@ -110,46 +172,74 @@ def validate(q: TrainQuery) -> list:
         if lo < q.teeth_min or hi > q.teeth_max:
             errors.append(f'{name} gear bound must stay within the general tooth '
                           f'range ({q.teeth_min}-{q.teeth_max}).')
+    if q.clearance < 0:
+        errors.append('Clearance (teeth) must be 0 or greater.')
+
+    # Reachability. One stage changes speed by at most teeth_max/teeth_min, so n stages reach
+    # at most that to the n-th power. A target outside that window has NO exact train however
+    # long we search -- reject it with the stage count it would need, instead of running a slow
+    # search and handing back a bare empty list. Guarded on `not errors` because it needs the
+    # ratio and range checks above to have passed before its arithmetic means anything.
+    if not errors:
+        counts = _searchable_stage_counts(q)
+        if not counts:
+            errors.append(
+                f'No stage count between {q.min_stages} and {q.max_stages} can turn the output '
+                f'the {q.direction} way as the input: every mesh reverses rotation, so "same" '
+                f'needs an even number of stages and "opposite" an odd number.')
+        else:
+            span = Fraction(q.teeth_max, q.teeth_min)   # most one stage can change speed
+            target = Fraction(q.target_num, q.target_den)
+            reach = max(target, 1 / target)             # how far from 1:1 the train must travel
+            n = max(counts)
+            if span ** n < reach:
+                if span == 1:
+                    errors.append(
+                        f'With a single tooth count ({q.teeth_min}) every stage would be 1:1, '
+                        f'so no other ratio is reachable. Widen the tooth range.')
+                else:
+                    needed = n + 1
+                    while (span ** needed < reach
+                           or (q.direction == 'same' and needed % 2)
+                           or (q.direction == 'opposite' and needed % 2 == 0)):
+                        needed += 1
+                    errors.append(
+                        f'A {float(reach):g}x speed change is not reachable in {n} '
+                        f'stage{"s" if n > 1 else ""} with teeth {q.teeth_min}-{q.teeth_max}: '
+                        f'each stage can change speed by at most {float(span):g}x. '
+                        f'It needs at least {needed} stages.')
     return errors
 
 
 def normalize(q: TrainQuery):
-    """Return (adjusted_query, warnings). Coaxial forces >= 2 stages; very small tooth
-    counts are flagged. These are advisories, never errors."""
+    """Return (adjusted_query, warnings). Coaxial forces >= 2 stages. These are advisories,
+    never errors -- tooth counts are hard-limited in validate()."""
     warnings = []
     min_stages = q.min_stages
     if q.coaxial and min_stages < 2:
         min_stages = 2
         warnings.append('Coaxial input/output requires at least 2 stages; '
                         'raised the minimum stage count to 2.')
-    if q.teeth_min < MIN_TEETH_WARN:
-        warnings.append(f'Tooth counts below {MIN_TEETH_WARN} are hard to make as '
-                        f'cycloidal pinions; some results may be impractical to print.')
     return replace(q, min_stages=min_stages), warnings
 
 
-def _arrange_for_ends(stages, in_lo, in_hi, out_lo, out_hi):
-    """Reorder `stages` (a tuple/sequence of Stage) as input-first ... output-last so the
-    first stage's DRIVING gear lies in [in_lo, in_hi] and the last stage's DRIVEN gear lies
-    in [out_lo, out_hi]. Return the reordered tuple, or None if no such arrangement exists.
+def _arrange_buildable(stages, in_lo, in_hi, out_lo, out_hi, clearance):
+    """Return an ordering of `stages` (input-first ... output-last) whose first DRIVING
+    gear lies in [in_lo, in_hi], last DRIVEN gear lies in [out_lo, out_hi], AND which
+    satisfies the single-plane clearance rule (see _clearance_ok). Return None if none.
 
-    A single stage cannot be both the input arbor and the output arbor, so for >= 2 stages
-    the input and output stages must sit at DIFFERENT positions. Middle stages keep their
-    (canonical) order. Duplicate identical stages are distinct positions, so they qualify.
+    A train is an unordered multiset of stages, so this searches permutations; stage counts
+    are tiny. This unifies the end-gear-bounds arrangement and buildability into one test.
+    When no end bounds are set the caller passes the full tooth range, so only clearance
+    constrains the ordering.
     """
-    n = len(stages)
-    if n == 1:
-        s = stages[0]
-        if in_lo <= s.driving <= in_hi and out_lo <= s.driven <= out_hi:
-            return tuple(stages)
-        return None
-    in_idx = [k for k, s in enumerate(stages) if in_lo <= s.driving <= in_hi]
-    out_idx = [k for k, s in enumerate(stages) if out_lo <= s.driven <= out_hi]
-    for i in in_idx:
-        for j in out_idx:
-            if i != j:
-                middle = [stages[k] for k in range(n) if k != i and k != j]
-                return (stages[i],) + tuple(middle) + (stages[j],)
+    for order in permutations(stages):
+        if not (in_lo <= order[0].driving <= in_hi):
+            continue
+        if not (out_lo <= order[-1].driven <= out_hi):
+            continue
+        if _clearance_ok(order, clearance):
+            return order
     return None
 
 
@@ -176,16 +266,72 @@ def _is_irreducible(stages) -> bool:
     return True
 
 
+def _clearance_ok(order, clearance) -> bool:
+    """True iff, laid out input->output as `order` (a sequence of Stage), every wheel's
+    pitch radius clears the NON-meshing neighbouring arbor shaft by at least `clearance`
+    teeth of tooth-sum.
+
+    Derivation: the physical rule is wheel_radius + K < center_distance, i.e. N/2 + K < M/2,
+    i.e. M - N >= 2K. With g = 2K in tooth units, at each internal arbor A_i (between
+    order[i-1] and order[i]):
+        sum(order[i])   - driven(order[i-1])  >= g   # driven wheel clears the FAR arbor
+        sum(order[i-1]) - driving(order[i])   >= g   # driving wheel clears the NEAR arbor
+    End arbors carry a single gear (no opposite neighbour), so a large wheel there is free.
+    """
+    for i in range(1, len(order)):
+        if order[i].tooth_sum() - order[i - 1].driven < clearance:
+            return False
+        if order[i - 1].tooth_sum() - order[i].driving < clearance:
+            return False
+    return True
+
+
+def _stage_key(stages) -> tuple:
+    """Direction-aware, order-independent identity of a stage multiset: the (driving, driven)
+    pairs, sorted. Two trains with the same key are the same train laid out differently, so
+    this is what both _enumerate and search() dedup on. `(72, 90)` and `(90, 72)` are
+    reciprocal stages and must stay distinct -- hence pairs, not sums.
+    """
+    return tuple(sorted((s.driving, s.driven) for s in stages))
+
+
+def _spread(items) -> list:
+    """Return `items` reordered so that any PREFIX samples the whole list evenly.
+
+    Bit-reversal (van der Corput) order: index i of the output is the input index whose
+    bit pattern is i reversed. Deterministic -- no RNG -- so searches stay reproducible.
+
+    Used to pick the order in which _enumerate visits first stages. Ascending (a, b) order
+    spends the whole work budget in the small-gear corner and never reaches the large-driven
+    first stages that deep reductions need; a low-discrepancy order reaches them immediately.
+    """
+    n = len(items)
+    if n < 3:
+        return list(items)
+    bits = (n - 1).bit_length()      # narrowest width with 2**bits >= n
+    width = f'0{bits}b'
+    order = []
+    for i in range(1 << bits):
+        r = int(format(i, width)[::-1], 2)
+        if r < n:                    # reversal can overshoot when n is not a power of two
+            order.append(items[r])
+    return order
+
+
 def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
-    """Enumerate exact `n`-stage trains; return (trains, truncated).
+    """Enumerate exact `n`-stage trains; return (trains, truncated, dropped).
+
+    `dropped` counts distinct exact trains rejected for having no single-plane-buildable
+    arrangement.
 
     All exact `n`-stage trains over [teeth_min, teeth_max], both directions.
     When q.coaxial is set, the first stage fixes the tooth sum S and every later stage
     must satisfy driving + driven == S (equal center distance at one module).
 
     Stages are placed in canonical non-decreasing (driving, driven) order, so each stage
-    multiset is emitted exactly once -- no n! reorderings (the raw list is already
-    duplicate-free). `search()` still dedups across stage counts as a backstop.
+    multiset is reached exactly once. Results are collected in a dict keyed by that multiset
+    so that re-exploring a subtree (see the budget-fair driver in the next task) cannot
+    produce duplicates. `search()` still dedups across stage counts as a backstop.
 
     Recursion: `remaining` is the product the not-yet-placed stages must still equal.
     Placing stage (a, b) consumes a factor, leaving remaining * b / a for the rest.
@@ -199,49 +345,40 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
     number of trains materialized (memory); `work_budget` caps stage placements explored
     (time). Gear-train search is NP-hard in general and loose targets over wide ranges
     have astronomically many exact solutions; since search() only keeps MAX_RESULTS,
-    there is no point exploring further. The known-better algorithm for the overlapping
-    subproblems is DP/memoization on the remaining-ratio state, but with a small result
-    cap the bounded DFS is sufficient.
+    there is no point exploring further.
     """
-    out = []
+    out = {}                             # stage-multiset key -> GearTrain (dedups re-exploration)
+    dropped = set()                      # keys of exact trains with no buildable arrangement
     L, H = q.teeth_min, q.teeth_max
     in_lo = q.input_min if q.input_min is not None else L
     in_hi = q.input_max if q.input_max is not None else H
     out_lo = q.output_min if q.output_min is not None else L
     out_hi = q.output_max if q.output_max is not None else H
-    # Apply end-gear filtering/ordering if ANY bound field is set. validate() guarantees
-    # complete pairs via search(); keying on all four (not just the mins) also makes a
-    # direct _enumerate() call honour a lone max instead of silently dropping it.
-    bounded = any(v is not None for v in
-                  (q.input_min, q.input_max, q.output_min, q.output_max))
     target = Fraction(q.target_num, q.target_den)
     # R2 (monotonic): when set, tighten every stage to the target's speed direction.
     # target != 1 is guaranteed by validate() (1:1 targets are rejected).
     step_up = q.monotonic and target > 1     # every stage must be driving > driven
     step_down = q.monotonic and target < 1   # every stage must be driving < driven
     work = [0]                           # stage placements explored; bounded by work_budget
+    slice_end = [None]                   # work[0] ceiling for the current first stage, or None
 
-    def stop() -> bool:
+    def over_budget() -> bool:
+        """A global safety valve tripped -- the whole enumeration is done."""
         return ((limit is not None and len(out) >= limit) or
                 (work_budget is not None and work[0] >= work_budget))
 
-    def recurse(remaining: Fraction, k: int, stages: tuple, coax_sum, prev):
-        if stop():
-            return
-        if k == 0:
-            if remaining == 1:
-                if not q.monotonic and not _is_irreducible(stages):
-                    return                    # reducible -> drop, do not count
-                if bounded:
-                    arranged = _arrange_for_ends(stages, in_lo, in_hi, out_lo, out_hi)
-                    if arranged is not None:
-                        out.append(GearTrain(arranged))
-                else:
-                    out.append(GearTrain(stages))
-            return
+    def stop() -> bool:
+        return over_budget() or (slice_end[0] is not None and work[0] >= slice_end[0])
+
+    def candidates(remaining, k, coax_sum, prev):
+        """Yield the (a, b) stages placeable at depth k, in canonical ascending order.
+
+        Charges the work counter exactly as the old inline loops did: one unit per `a`
+        slice computed, one per `b` scanned.
+        """
+        pa, pb = prev                    # last placed stage; enforce (a, b) >= (pa, pb)
         lo = Fraction(L, H) ** (k - 1)   # child ratio-range lower bound
         hi = Fraction(H, L) ** (k - 1)   # child ratio-range upper bound
-        pa, pb = prev                    # last placed stage; enforce (a, b) >= (pa, pb)
         for a in range(max(L, pa), H + 1):
             work[0] += 1                 # count the per-a slice computation (bounds time)
             # child remaining = remaining * b / a must be in [lo, hi]  =>
@@ -259,24 +396,89 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
                 # single candidate instead of scanning (and rejecting) the whole slice.
                 b = coax_sum - a
                 if b_lo <= b <= b_hi and b != a:   # skip 1:1 (pass-through) stages
-                    recurse(remaining * Fraction(b, a), k - 1,
-                            stages + (Stage(a, b),), coax_sum, (a, b))
+                    yield a, b
             else:
                 for b in range(b_lo, b_hi + 1):
                     work[0] += 1
-                    if b == a:                     # skip 1:1 (pass-through) stages
-                        continue
-                    # The first stage of a coaxial search fixes the shared sum S.
-                    next_sum = a + b if q.coaxial else None
-                    recurse(remaining * Fraction(b, a), k - 1,
-                            stages + (Stage(a, b),), next_sum, (a, b))
+                    if b != a:                     # skip 1:1 (pass-through) stages
+                        yield a, b
+
+    def leaf(stages):
+        """Gate a completed exact train and file it under its stage-multiset key."""
+        if not q.monotonic and not _is_irreducible(stages):
+            return                        # reducible -> drop, do not count
+        key = _stage_key(stages)
+        # Always-on single-plane buildability: keep the train only if some ordering
+        # satisfies the end-gear bounds AND the clearance rule; store it in that order
+        # (input -> output). in_lo..out_hi default to the full range when no end bounds
+        # are set, so this also picks a buildable display order.
+        arranged = _arrange_buildable(stages, in_lo, in_hi, out_lo, out_hi, q.clearance)
+        if arranged is not None:
+            out.setdefault(key, GearTrain(arranged))
+        else:
+            dropped.add(key)              # exact but not single-plane buildable
+
+    def recurse(remaining: Fraction, k: int, stages: tuple, coax_sum, prev):
+        if stop():
+            return
+        if k == 0:
+            if remaining == 1:
+                leaf(stages)
+            return
+        for a, b in candidates(remaining, k, coax_sum, prev):
+            # The first stage of a coaxial search fixes the shared sum S; once fixed it is
+            # threaded down untouched (candidates() only forces b when coax_sum is set).
+            next_sum = coax_sum if coax_sum is not None else (a + b if q.coaxial else None)
+            recurse(remaining * Fraction(b, a), k - 1,
+                    stages + (Stage(a, b),), next_sum, (a, b))
             if stop():
                 return
 
-    recurse(target, n, (), None, (0, 0))
-    truncated = ((limit is not None and len(out) >= limit) or
-                 (work_budget is not None and work[0] >= work_budget))
-    return out, truncated
+    if q.coaxial or n == 1:
+        # Nothing to spread. The coaxial rule collapses every stage AFTER the first to a single
+        # candidate (b = S - a), so no first stage can own a disproportionately expensive
+        # subtree -- there is no starvation to fix. A 1-stage train has no subtree at all.
+        recurse(target, n, (), None, (0, 0))
+        cut_short = False
+    else:
+        # Budget-fair exploration (iterative broadening). Visit first stages in a
+        # low-discrepancy order so a short run still reaches the large-gear region, and cap
+        # each one's subtree; then double the allowance and revisit the ones that were cut
+        # off. Re-exploring repeats work, but `out`/`dropped` are keyed so it cannot
+        # duplicate results, and the doubling keeps the total near 2x the LAST allowance used
+        # (up to ~4x a subtree's true cost, when that cost sits just past a doubling step).
+        # When the space is small every first stage completes on some pass, `pending` empties,
+        # and the result set is exactly what an unbounded plain DFS would produce.
+        # Listing the first stages is itself work, and on a very wide range it alone can cost
+        # more than the whole budget (measured ~4M units for teeth 1-2000). Cap it at half, so
+        # exploring the stages we did find always keeps a share -- otherwise the listing spends
+        # everything and the loop below never runs, returning nothing.
+        if work_budget is not None:
+            slice_end[0] = work[0] + work_budget // 2
+        pending = []
+        for cand in candidates(target, n, None, (0, 0)):
+            pending.append(cand)
+            if stop():
+                break
+        slice_end[0] = None
+        pending = _spread(pending)
+        allowance = FIRST_STAGE_SLICE
+        while pending and not over_budget():
+            retry = []
+            for a, b in pending:
+                if over_budget():
+                    retry.append((a, b))       # never explored this pass -> still unfinished
+                    continue
+                slice_end[0] = work[0] + allowance
+                recurse(target * Fraction(b, a), n - 1, (Stage(a, b),), None, (a, b))
+                if work[0] >= slice_end[0]:
+                    retry.append((a, b))       # hit its ceiling -> more of this subtree remains
+            slice_end[0] = None
+            pending = retry
+            allowance *= 2
+        cut_short = bool(pending)
+
+    return list(out.values()), over_budget() or cut_short, len(dropped)
 
 
 def _generate(q: TrainQuery, n: int, limit=None, work_budget=None) -> list:
@@ -293,48 +495,127 @@ class SearchResult:
 
 
 def _canonical(train: GearTrain) -> tuple:
-    # Direction-aware, order-independent key: (driving, driven) pairs, sorted.
-    return tuple(sorted((s.driving, s.driven) for s in train.stages))
+    return _stage_key(train.stages)
 
 
 def _sort_key(train: GearTrain) -> tuple:
     return (len(train.stages), train.total_teeth(), _canonical(train))
 
 
+def _collect(q: TrainQuery, seen: dict, cap: int):
+    """Run the stage-count loop for `q`, filing trains into `seen` by canonical key.
+
+    Returns (truncated, dropped_total). Stops climbing once `seen` holds `cap` trains:
+    results sort by (num_stages, ...), so every higher-stage-count train sorts strictly
+    after these and can never enter the top MAX_RESULTS. More solutions may exist at higher
+    stage counts, so that early stop flags truncation. Conversely truncated=False means the
+    whole stage range was enumerated exhaustively -- callers rely on that (see _merge_coaxial).
+
+    `dropped_total` is only ever used as a boolean ("did buildability empty the results?"), so
+    when a caller sums it across passes the total may double-count a train both found.
+    """
+    truncated = False
+    dropped_total = 0
+    for n in range(q.min_stages, q.max_stages + 1):
+        if q.direction == 'same' and n % 2 != 0:
+            continue
+        if q.direction == 'opposite' and n % 2 == 0:
+            continue
+        level, level_truncated, level_dropped = _enumerate(q, n, limit=GENERATE_LIMIT,
+                                                          work_budget=_work_budget(q))
+        dropped_total += level_dropped
+        if level_truncated:
+            truncated = True          # a safety valve tripped -> this level was cut short
+        for train in level:
+            seen.setdefault(_canonical(train), train)
+        if len(seen) >= cap:
+            truncated = True
+            break
+    return truncated, dropped_total
+
+
+def _diverse(trains: list, per_first: int, cap: int) -> list:
+    """Reorder `trains` so at most `per_first` share one displayed first stage at the head,
+    then truncate to `cap`. Display-only -- never called from _enumerate, so the enumerated
+    pool the completeness tests compare against is untouched.
+
+    Over-quota trains are DEMOTED to the tail, not dropped: below `cap` every train is still
+    returned (just reordered), and at `cap` the tail is backfilled with the most compact
+    leftovers rather than leaving slots empty. `trains` must already be sorted by _sort_key,
+    so the head is the most compact train of each distinct first stage.
+
+    The key is the DISPLAYED first stage -- each train is stored in buildable input->output
+    order, so stages[0] is the input arbor's mesh, which is what visibly repeats.
+    """
+    kept, overflow, counts = [], [], {}
+    for train in trains:
+        key = (train.stages[0].driving, train.stages[0].driven)
+        if counts.get(key, 0) < per_first:
+            counts[key] = counts.get(key, 0) + 1
+            kept.append(train)
+        else:
+            overflow.append(train)
+    return (kept + overflow)[:cap]
+
+
+def _merge_coaxial(q: TrainQuery, seen: dict) -> int:
+    """Merge the coaxial variant of `q` into `seen`; return its dropped-train count.
+
+    Whatever the coaxial pass returns has already passed the same buildability gate as the
+    general pass, so every one of its trains belongs in the general result set. But the
+    coaxial rule collapses branching (driven = S - driving is a single candidate), letting it
+    reach deep trains the general DFS cannot afford within its work budget -- so without this
+    merge, turning the coaxial option ON could surface a train the general search missed.
+    (Equal tooth sums make the gap at each arbor exactly the neighbouring gear's tooth count,
+    so a coaxial train is buildable iff every gear has at least `clearance` teeth -- true of
+    any real gear at the default clearance of 2. Only clearance > teeth_min breaks it, e.g.
+    (6,60)+(30,36) at clearance 7. The gate below is what guarantees validity regardless.)
+
+    Deliberately does NOT report truncation. If the general pass was exhaustive it already
+    contains every coaxial train that exists, so the probe running out of budget tells the
+    user nothing; and if the general pass was truncated the flag is already set. Propagating
+    it would raise a partial-results warning -- which the palette renders as directive advice
+    to narrow the search -- for a query that was in fact answered completely.
+    """
+    coax_seen = {}
+    cq, _ = normalize(replace(q, coaxial=True))    # bumps min_stages to >= 2
+    _, coax_dropped = _collect(cq, coax_seen, MAX_RESULTS)
+    for key, train in coax_seen.items():
+        seen.setdefault(key, train)
+    return coax_dropped
+
+
 def search(q: TrainQuery) -> SearchResult:
-    """Validate -> normalize -> generate across the stage-count range -> dedup -> order
-    -> cap. Fewest stages first, then most compact (smallest total tooth count)."""
+    """Validate -> normalize -> search the stage-count range -> merge in coaxial trains if the
+    pool came up short -> dedup -> order fewest-stages-then-most-compact -> spread the head
+    across distinct first stages -> cap at MAX_RESULTS."""
     errors = validate(q)
     if errors:
         return SearchResult(trains=[], truncated=False, warnings=(), error='; '.join(errors))
 
     q, warnings = normalize(q)
     seen = {}
-    truncated = False
-    for n in range(q.min_stages, q.max_stages + 1):
-        if q.direction == 'same' and n % 2 != 0:
-            continue
-        if q.direction == 'opposite' and n % 2 == 0:
-            continue
-        level, level_truncated = _enumerate(q, n, limit=GENERATE_LIMIT,
-                                             work_budget=WORK_BUDGET)
-        if level_truncated:
-            truncated = True          # a safety valve tripped -> this level was cut short
-        for train in level:
-            key = _canonical(train)
-            if key not in seen:
-                seen[key] = train
-        if len(seen) >= MAX_RESULTS:
-            # Results sort by (num_stages, ...), so every higher-stage-count train sorts
-            # strictly after these -- it can never enter the top MAX_RESULTS. Stop
-            # climbing; more solutions may exist at higher stage counts, so flag truncation.
-            truncated = True
-            break
+    truncated, dropped_total = _collect(q, seen, MAX_RESULTS)
+
+    if not q.coaxial and len(seen) < MAX_RESULTS:
+        # Only when the general pass came up short. The extra pass is not free (measured ~6s
+        # on wide queries), and a full pool is dominated by low-stage-count trains that
+        # outrank late coaxial finds on _sort_key. NOTE that is a practical argument, not a
+        # guarantee: when the pool filled from a level that was itself cut short, the 200+
+        # trains in it are an arbitrary slice of that level, so a more compact coaxial train
+        # could in principle be missed here. Such a search already reports truncated=True, so
+        # the user is told the list is partial. Widening this gate would cost the common case.
+        dropped_total += _merge_coaxial(q, seen)
 
     trains = sorted(seen.values(), key=_sort_key)
     if len(trains) > MAX_RESULTS:
+        # The POOL overflowed. _diverse only ever reorders and then slices to this same
+        # MAX_RESULTS, so it cannot drop a train without this flag already being set -- keep
+        # the two uses of MAX_RESULTS below in step with this check.
         truncated = True
-        trains = trains[:MAX_RESULTS]
+    trains = _diverse(trains, MAX_PER_FIRST_STAGE, MAX_RESULTS)
+    if not trains and dropped_total:
+        warnings.append(BUILDABILITY_EMPTY_WARNING)
     return SearchResult(trains=trains, truncated=truncated,
                         warnings=tuple(warnings), error=None)
 

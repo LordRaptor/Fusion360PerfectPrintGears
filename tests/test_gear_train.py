@@ -48,6 +48,30 @@ def test_is_irreducible_three_stage_cancelling_subset_is_reducible():
     assert gt._is_irreducible(stages) is False
 
 
+def test_clearance_ok_single_stage_is_vacuously_true():
+    assert gt._clearance_ok((gt.Stage(12, 60),), 2) is True
+
+
+def test_clearance_ok_rejects_overreaching_wheel():
+    # driven 60 (pitch radius 30) next to a stage of tooth-sum 48 (center distance 24):
+    # 48 - 60 = -12 < g=2 -> the 60t wheel swallows the next arbor's shaft.
+    order = (gt.Stage(13, 60), gt.Stage(12, 36))
+    assert gt._clearance_ok(order, 2) is False
+
+
+def test_clearance_ok_accepts_when_neighbour_is_large_enough():
+    # driven 48 next to sum 73 (13+60): 73-48=25>=2 ; driving 13 vs sum 60 (12+48): 60-13=47
+    order = (gt.Stage(12, 48), gt.Stage(13, 60))
+    assert gt._clearance_ok(order, 2) is True
+
+
+def test_clearance_ok_tangent_passes_at_zero_fails_positive():
+    # driven 40 vs neighbour tooth-sum 40 -> gap exactly 0.
+    order = (gt.Stage(8, 40), gt.Stage(8, 32))
+    assert gt._clearance_ok(order, 0) is True
+    assert gt._clearance_ok(order, 1) is False
+
+
 def test_geartrain_ratio_is_product():
     train = gt.GearTrain(stages=(gt.Stage(36, 6), gt.Stage(40, 20)))
     assert train.ratio() == Fraction(12, 1)   # 6 * 2
@@ -118,9 +142,11 @@ def test_normalize_leaves_noncoaxial_alone():
     assert warnings == []
 
 
-def test_normalize_warns_on_small_teeth():
-    q, warnings = gt.normalize(_valid_query(teeth_min=4))
-    assert any('cycloidal' in w.lower() or str(gt.MIN_TEETH_WARN) in w for w in warnings)
+def test_validate_rejects_too_few_teeth():
+    # Below MIN_TEETH a cycloidal pinion cannot be made; this used to be a mere warning.
+    errs = gt.validate(_valid_query(teeth_min=4))
+    assert any('tooth' in e.lower() for e in errs)
+    assert gt.validate(_valid_query(teeth_min=1)) != []      # a 1-tooth gear is not a gear
 
 
 def _ratios(trains):
@@ -216,10 +242,32 @@ def test_search_truncates_and_flags():
     assert len(res.trains) == gt.MAX_RESULTS
 
 
+def test_search_warns_when_buildability_empties_results():
+    # A clearance larger than any achievable tooth-sum gap makes every MULTI-stage train
+    # unbuildable; exact 2-stage solutions exist, so the result is empty WITH a warning.
+    q = _valid_query(target_num=12, target_den=1, min_stages=2, max_stages=2,
+                     teeth_min=6, teeth_max=90, clearance=1000)
+    res = gt.search(q)
+    assert res.trains == []
+    assert any('buildable' in w.lower() for w in res.warnings)
+
+
+def test_search_no_buildability_warning_when_no_exact_ratio():
+    # No exact train exists at all (nothing is dropped for buildability), so the buildability
+    # warning must NOT fire. 7:5 over teeth 6..12 is reachable but has no exact pair in range.
+    q = _valid_query(target_num=7, target_den=5, min_stages=1, max_stages=1,
+                     teeth_min=6, teeth_max=12)
+    res = gt.search(q)
+    assert res.trains == []
+    assert not any('buildable' in w.lower() for w in res.warnings)
+
+
 def test_search_empty_when_no_solution():
-    # 7 : 1 with a prime 7 that cannot be formed from teeth 8..12 in one stage.
-    q = _valid_query(target_num=7, target_den=1, min_stages=1, max_stages=1,
-                     teeth_min=8, teeth_max=12)
+    # 7:5 over teeth 6..12 in one stage. Reachable in principle (each stage can change speed
+    # by up to 12/6 = 2x, and 7/5 = 1.4x), so it passes the reachability check -- but no exact
+    # pair exists in range: (7,5) is below the minimum and (14,10) is above the maximum.
+    q = _valid_query(target_num=7, target_den=5, min_stages=1, max_stages=1,
+                     teeth_min=6, teeth_max=12)
     res = gt.search(q)
     assert res.trains == []
     assert res.error is None
@@ -329,6 +377,22 @@ def _combo_is_monotonic(combo, target):
     return all(s.driving < s.driven for s in combo)
 
 
+def _combo_admits_buildable(combo, in_lo, in_hi, out_lo, out_hi, clearance):
+    """Reference (independent of the engine): True iff some ordering of `combo` puts a
+    driving gear in the input range first, a different-position driven gear in the output
+    range last, AND satisfies the single-plane clearance rule."""
+    for order in itertools.permutations(combo):
+        if not (in_lo <= order[0].driving <= in_hi):
+            continue
+        if not (out_lo <= order[-1].driven <= out_hi):
+            continue
+        if all(order[i].tooth_sum() - order[i - 1].driven >= clearance and
+               order[i - 1].tooth_sum() - order[i].driving >= clearance
+               for i in range(1, len(order))):
+            return True
+    return False
+
+
 def _brute_force_keys(q):
     """Obvious O(range^(2n)) reference: enumerate every stage combination, keep exact
     matches (respecting direction parity + coaxial), return their canonical keys."""
@@ -357,6 +421,8 @@ def _brute_force_keys(q):
                     continue
             elif not _combo_is_irreducible(combo):
                 continue
+            if not _combo_admits_buildable(combo, L, H, L, H, qn.clearance):
+                continue
             keys.add(tuple(sorted((s.driving, s.driven) for s in combo)))
     return keys
 
@@ -364,6 +430,36 @@ def _brute_force_keys(q):
 def _search_keys(q):
     return {tuple(sorted((s.driving, s.driven) for s in t.stages))
             for t in gt.search(q).trains}
+
+
+def test_search_every_returned_train_is_buildable():
+    q = _valid_query(target_num=1, target_den=60, min_stages=1, max_stages=4,
+                     teeth_min=8, teeth_max=90)
+    res = gt.search(q)
+    assert res.trains
+    for t in res.trains:
+        assert gt._clearance_ok(t.stages, q.clearance)
+
+
+def test_search_coaxial_trains_stay_valid_under_buildability():
+    q = _valid_query(target_num=1, target_den=60, min_stages=2, max_stages=4,
+                     teeth_min=8, teeth_max=90, coaxial=True)
+    res = gt.search(q)
+    assert res.trains, 'coaxial trains are always buildable'
+    for t in res.trains:
+        assert gt._clearance_ok(t.stages, q.clearance)
+
+
+def test_search_higher_clearance_is_a_subset():
+    # Verified: 2:1 over 6..20 (2 stages) yields 88 buildable trains at clearance 0 and 84 at
+    # clearance 4 -- untruncated, a genuine strict subset. (12:1 does NOT work: its trains all
+    # have large tooth-sum gaps so clearance 4 removes nothing, and the set also truncates.)
+    base = dict(target_num=2, target_den=1, min_stages=2, max_stages=2,
+                teeth_min=6, teeth_max=20)
+    loose = _search_keys(_valid_query(clearance=0, **base))
+    tight = _search_keys(_valid_query(clearance=4, **base))
+    assert tight <= loose            # tightening never adds trains
+    assert tight != loose            # and it removes at least one near-tangent train
 
 
 def test_pruned_search_matches_brute_force_small():
@@ -502,45 +598,50 @@ def test_validate_explicit_none_end_bounds_is_clean():
                                     output_min=None, output_max=None)) == []
 
 
-def test_arrange_single_stage_needs_both_ends_on_one_stage():
+def test_arrange_buildable_single_stage_needs_both_ends():
     stages = (gt.Stage(8, 40),)
-    # input gear 8 in [6,10] and output gear 40 in [30,50] -> keep
-    assert gt._arrange_for_ends(stages, 6, 10, 30, 50) == stages
-    # output gear 40 not in [50,60] -> no arrangement
-    assert gt._arrange_for_ends(stages, 6, 10, 50, 60) is None
+    assert gt._arrange_buildable(stages, 6, 10, 30, 50, 2) == stages
+    assert gt._arrange_buildable(stages, 6, 10, 50, 60, 2) is None
 
 
-def test_arrange_two_stage_orders_input_first_output_last():
+def test_arrange_buildable_orders_input_first_output_last():
     stages = (gt.Stage(8, 24), gt.Stage(30, 72))
-    arranged = gt._arrange_for_ends(stages, 6, 10, 60, 80)   # input 8, output 72
+    arranged = gt._arrange_buildable(stages, 6, 10, 60, 80, 0)   # input 8, output 72
     assert arranged is not None
-    assert arranged[0].driving == 8      # input arbor is first
-    assert arranged[-1].driven == 72     # output arbor is last
+    assert arranged[0].driving == 8 and arranged[-1].driven == 72
 
 
-def test_arrange_two_stage_rejects_when_only_one_stage_serves_both_ends():
-    # stage 0 is the ONLY input-qualifier (driving 8 in [6,10]) AND the ONLY
-    # output-qualifier (driven 40 in [38,42]); one stage cannot be both arbors -> None.
+def test_arrange_buildable_rejects_when_one_stage_serves_both_ends():
     stages = (gt.Stage(8, 40), gt.Stage(30, 20))
-    assert gt._arrange_for_ends(stages, 6, 10, 38, 42) is None
+    assert gt._arrange_buildable(stages, 6, 10, 38, 42, 0) is None
 
 
-def test_arrange_duplicate_qualifying_stages_pass():
-    # Two identical qualifying stages are distinct POSITIONS, so a valid i != j exists.
+def test_arrange_buildable_duplicate_qualifying_stages_pass():
     stages = (gt.Stage(8, 40), gt.Stage(8, 40))
-    arranged = gt._arrange_for_ends(stages, 6, 10, 38, 42)
+    arranged = gt._arrange_buildable(stages, 6, 10, 38, 42, 0)
     assert arranged is not None
     assert arranged[0].driving == 8 and arranged[-1].driven == 40
 
 
+def test_arrange_buildable_end_cap_blocks_the_only_clearing_order():
+    # The user's real train: with output <= 44 the 60t cannot go to the output, and no
+    # other stage's tooth-sum exceeds 60 by 2, so NO ordering is buildable.
+    stages = (gt.Stage(12, 13), gt.Stage(12, 48), gt.Stage(13, 60), gt.Stage(12, 36))
+    assert gt._arrange_buildable(stages, 8, 44, 8, 44, 2) is None
+    # Without the end cap, an ordering exists (the 60t sits at the output).
+    arranged = gt._arrange_buildable(stages, 8, 90, 8, 90, 2)
+    assert arranged is not None
+    assert gt._clearance_ok(arranged, 2)
+
+
 def test_search_input_bound_orders_first_stage_driving():
     q = _valid_query(target_num=12, target_den=1, min_stages=2, max_stages=2,
-                     teeth_min=6, teeth_max=90, input_min=18, input_max=20)
+                     teeth_min=6, teeth_max=90, input_min=81, input_max=83)
     res = gt.search(q)
     assert res.error is None
-    assert res.trains, 'expected trains with an input gear in 18..20'
+    assert res.trains, 'expected trains with an input gear in 81..83'
     for t in res.trains:
-        assert 18 <= t.stages[0].driving <= 20     # input arbor within bound AND first
+        assert 81 <= t.stages[0].driving <= 83     # input arbor within bound AND first
 
 
 def test_search_output_bound_orders_last_stage_driven():
@@ -562,26 +663,25 @@ def test_search_bounds_equal_to_general_range_keys_are_a_noop():
     assert bounded == plain
 
 
-def test_search_no_bounds_keeps_canonical_stage_order():
-    # The disabled (None) path must NOT reorder stages: each train's stored stages stay in
-    # canonical non-decreasing (driving, driven) order. Uses 3 stages so a reorder bug
-    # would actually show (with 2 stages the arranged tuple equals the canonical one).
+def test_search_no_bounds_returns_buildable_order():
+    # Buildability is always on, so with no end bounds each train is stored in a single-plane
+    # buildable order (NOT necessarily canonical). Uses 3 stages so ordering is meaningful.
     q = _valid_query(target_num=12, target_den=1, min_stages=3, max_stages=3,
                      teeth_min=6, teeth_max=40)
     res = gt.search(q)
     assert res.trains, 'expected 3-stage solutions'
     for t in res.trains:
-        pairs = [(s.driving, s.driven) for s in t.stages]
-        assert pairs == sorted(pairs), 'no-bounds path must keep canonical order'
+        assert gt._clearance_ok(t.stages, q.clearance), 'stored order must be buildable'
 
 
 def _brute_force_keys_bounded(q):
     """Reference like _brute_force_keys, but also honours the optional end-gear bounds.
 
-    Uses its OWN arrangement check (deliberately NOT gear_train._arrange_for_ends) so this
-    test verifies the pruned enumeration's COMPLETENESS independently of the implementation
-    it is checking. A combo counts iff some ordering puts a driving gear in the input range
-    first and a DIFFERENT driven gear in the output range last (1-stage: one stage does both).
+    Uses its OWN arrangement check (_combo_admits_buildable, deliberately NOT
+    gear_train._arrange_buildable) so this test verifies the pruned enumeration's
+    COMPLETENESS independently of the implementation it is checking. A combo counts iff some
+    ordering puts a driving gear in the input range first, a DIFFERENT driven gear in the
+    output range last, AND satisfies the single-plane clearance rule.
     """
     L, H = q.teeth_min, q.teeth_max
     in_lo = q.input_min if q.input_min is not None else L
@@ -591,13 +691,6 @@ def _brute_force_keys_bounded(q):
     target = Fraction(q.target_num, q.target_den)
     all_stages = [gt.Stage(a, b) for a in range(L, H + 1) for b in range(L, H + 1)
                   if a != b]                       # 1:1 stages are excluded by the solver
-
-    def admits(combo):
-        in_ok = [k for k, s in enumerate(combo) if in_lo <= s.driving <= in_hi]
-        out_ok = [k for k, s in enumerate(combo) if out_lo <= s.driven <= out_hi]
-        if len(combo) == 1:
-            return bool(in_ok) and bool(out_ok)     # one stage must satisfy both ends
-        return any(i != j for i in in_ok for j in out_ok)
 
     keys = set()
     qn, _ = gt.normalize(q)
@@ -619,20 +712,20 @@ def _brute_force_keys_bounded(q):
                     continue
             elif not _combo_is_irreducible(combo):
                 continue
-            if admits(combo):
+            if _combo_admits_buildable(combo, in_lo, in_hi, out_lo, out_hi, qn.clearance):
                 keys.add(tuple(sorted((s.driving, s.driven) for s in combo)))
     return keys
 
 
 def test_pruned_search_matches_brute_force_with_end_bounds():
     q = _valid_query(target_num=12, target_den=1, min_stages=2, max_stages=2,
-                     teeth_min=6, teeth_max=24, input_min=18, input_max=20)
+                     teeth_min=6, teeth_max=28, input_min=18, input_max=24)
     bounded = _search_keys(q)
     assert bounded, 'expected some qualifying trains'
     assert bounded == _brute_force_keys_bounded(q)
-    # genuine narrowing: some unbounded trains have every stage's driving > 20
+    # genuine narrowing: some unbounded trains have every stage's driving > 24
     open_keys = _search_keys(_valid_query(target_num=12, target_den=1, min_stages=2,
-                                          max_stages=2, teeth_min=6, teeth_max=24))
+                                          max_stages=2, teeth_min=6, teeth_max=28))
     assert bounded < open_keys
 
 
@@ -656,6 +749,19 @@ def test_trainquery_monotonic_can_be_set_and_is_valid():
     q = _valid_query(monotonic=True)
     assert q.monotonic is True
     assert gt.validate(q) == []          # a plain bool needs no new validation rule
+
+
+def test_trainquery_clearance_defaults_to_two():
+    assert _valid_query().clearance == 2
+
+
+def test_validate_rejects_negative_clearance():
+    errs = gt.validate(_valid_query(clearance=-1))
+    assert any('clearance' in e.lower() for e in errs)
+
+
+def test_validate_accepts_zero_clearance():
+    assert gt.validate(_valid_query(clearance=0)) == []
 
 
 def _train_has_cancelling_subset(train):
@@ -829,12 +935,12 @@ def test_monotonic_composes_with_coaxial_stepdown():
 
 
 def test_monotonic_composes_with_end_gear_bounds():
-    # R2 + end-gear bounds: 12:1 with the input gear bounded to 18..20 over 6..90. Without
+    # R2 + end-gear bounds: 12:1 with the input gear bounded to 81..83 over 6..90. Without
     # monotonic, some qualifying trains contain a step-down stage; monotonic removes those and
     # keeps only all-step-up trains, all still honoring the input bound (first stage's driving
-    # gear in 18..20). Non-vacuous (a bounded mixed-direction train exists when monotonic off).
+    # gear in 81..83). Non-vacuous (a bounded mixed-direction train exists when monotonic off).
     base = dict(target_num=12, target_den=1, min_stages=2, max_stages=2,
-                teeth_min=6, teeth_max=90, input_min=18, input_max=20)
+                teeth_min=6, teeth_max=90, input_min=81, input_max=83)
     off = gt.search(_valid_query(monotonic=False, **base))
     on = gt.search(_valid_query(monotonic=True, **base))
     assert not off.truncated and not on.truncated
@@ -842,5 +948,331 @@ def test_monotonic_composes_with_end_gear_bounds():
         'expected a mixed-direction train among the bounded results when monotonic is off'
     assert on.trains and len(on.trains) < len(off.trains)     # monotonic strictly pruned
     for t in on.trains:
-        assert 18 <= t.stages[0].driving <= 20                 # input bound still honored
+        assert 81 <= t.stages[0].driving <= 83                 # input bound still honored
         assert all(s.driving > s.driven for s in t.stages)     # all step-up
+
+
+def test_spread_is_a_permutation():
+    # Exact powers of two (4, 8, 16) and the sizes either side of them: the reversed index
+    # can only overshoot `n` when n is NOT a power of two, so both cases must be covered or
+    # a regression in the bit-width could silently drop or duplicate first stages.
+    for n in (3, 4, 7, 8, 9, 16, 17, 100):
+        items = list(range(n))
+        assert sorted(gt._spread(items)) == items, f'not a permutation for n={n}'
+
+
+def test_spread_handles_tiny_lists():
+    assert gt._spread([]) == []
+    assert gt._spread([7]) == [7]
+    assert gt._spread([7, 8]) == [7, 8]
+
+
+def test_spread_is_deterministic():
+    items = list(range(100))
+    assert gt._spread(items) == gt._spread(items)
+
+
+def test_spread_prefix_covers_the_whole_range():
+    # The point of the reordering: a short PREFIX must reach the far end of the list, which
+    # ascending order never does. With 100 items, the first 8 spread out instead of being 0..7.
+    order = gt._spread(list(range(100)))
+    prefix = order[:8]
+    assert max(prefix) > 50, f'prefix stayed in the low corner: {prefix}'
+    assert len({p // 25 for p in prefix}) >= 3, f'prefix did not cover quarters: {prefix}'
+
+
+def _repro_query(**over):
+    """The user-reported deep-reduction query (design spec 2026-07-25, section 1).
+
+    Palette input: ratio 60:1, exactly 4 stages, teeth 12-90, input gear 12-44, output gear
+    12-44, rotation 'same as input', same-direction stages only, clearance 2. The engine's
+    ratio is driving/driven -- the RECIPROCAL of the UI's input:output -- hence 1/60.
+    """
+    base = dict(target_num=1, target_den=60, min_stages=4, max_stages=4,
+                teeth_min=12, teeth_max=90, direction='same',
+                input_min=12, input_max=44, output_min=12, output_max=44,
+                monotonic=True, clearance=2, coaxial=False)
+    base.update(over)
+    return gt.TrainQuery(**base)
+
+
+def test_search_reaches_large_first_stage_trains():
+    # Budget-fair exploration. Before it, this query returned ZERO trains: the DFS drained its
+    # whole 600k work budget into the small-driven corner (first stage (12,13)) and truncated
+    # before reaching any first stage with a large driven gear. Verified after: 10 trains, all
+    # built on a first stage of (12,45) or (18,54) -- deep in the ascending enumeration order.
+    res = gt.search(_repro_query())
+    assert res.trains, 'budget-fair exploration must reach this deep reduction'
+    keys = {tuple(sorted((s.driving, s.driven) for s in t.stages)) for t in res.trains}
+    assert ((12, 45), (12, 45), (12, 48), (30, 32)) in keys
+    # The exact key above is tied to FIRST_STAGE_SLICE's default; this is the property that
+    # must hold regardless of tuning -- some train is built on a first stage whose driven gear
+    # is far above the small corner the old DFS never escaped (its first stage was (12,13)).
+    assert any(t.stages[0].driven >= 40 for t in res.trains), \
+        f'no train reached a large-driven first stage: {sorted(keys)}'
+
+
+def _first_stages(trains):
+    return {(t.stages[0].driving, t.stages[0].driven) for t in trains}
+
+
+def test_search_results_span_many_first_stages():
+    # The "200 clones" complaint, pinned. Measured on the OLD engine this exact query returned
+    # 200 trains sharing exactly ONE displayed first stage; budget-fair exploration returns
+    # trains spanning ~38. This is the anti-clone property the whole change exists for, and it
+    # is what makes the lower train COUNT on such queries a feature, not a regression: the two
+    # result sets are disjoint -- clones traded for variety.
+    q = _valid_query(target_num=1, target_den=60, min_stages=4, max_stages=4,
+                     teeth_min=8, teeth_max=90)
+    res = gt.search(q)
+    assert res.trains
+    assert len(_first_stages(res.trains)) >= 15, \
+        f'results clustered on {len(_first_stages(res.trains))} first stage(s)'
+
+
+def test_work_budget_scales_with_the_tooth_range():
+    # Calls _work_budget directly, so the teeth values here intentionally bypass validate()'s
+    # 6-150 limits -- this tests the scaling arithmetic, not what the UI accepts.
+    # A span at or below REFERENCE_SPAN keeps exactly WORK_BUDGET, so narrow queries -- every
+    # completeness parity test included -- are bit-for-bit unaffected by the scaling.
+    narrow = _valid_query(teeth_min=6, teeth_max=24)
+    assert gt._work_budget(narrow) == gt.WORK_BUDGET
+    assert gt._work_budget(_valid_query(teeth_min=8, teeth_max=87)) == gt.WORK_BUDGET
+    # A wider span buys proportionally more budget (quadratic in the span)...
+    wide = _valid_query(teeth_min=8, teeth_max=167)          # span 160 == 2x REFERENCE_SPAN
+    assert gt._work_budget(wide) == 4 * gt.WORK_BUDGET
+    # ...but never more than the responsiveness ceiling.
+    assert gt._work_budget(_valid_query(teeth_min=1, teeth_max=2000)) == gt.MAX_WORK_BUDGET
+
+
+def test_search_wide_tooth_range_still_finds_varied_trains():
+    # A wide-but-plausible range (teeth 8-120, well past the 8-90 palette default) is where the
+    # fixed 600k budget used to spread too thinly to reach any leaf. With the span-scaled budget
+    # it returns trains across many first stages. Measured: ~101 trains over ~44 first stages.
+    q = _valid_query(target_num=1, target_den=60, min_stages=4, max_stages=4,
+                     teeth_min=8, teeth_max=120)
+    t0 = time.perf_counter()
+    res = gt.search(q)
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 25.0, f'wide range took {elapsed:.1f}s'
+    assert res.trains, 'a wide range must still return trains'
+    assert all(t.ratio() == Fraction(1, 60) for t in res.trains)
+    assert len(_first_stages(res.trains)) >= 10, \
+        f'wide-range results clustered on {len(_first_stages(res.trains))} first stage(s)'
+
+
+def test_search_general_results_include_the_coaxial_ones():
+    # Invariant: every coaxial train is single-plane buildable, so the general (buildable)
+    # search must be a SUPERSET of the coaxial one. Verified violated without the merge: the
+    # general search returns 72 trains here and misses BOTH of the 2 coaxial ones. Uses
+    # teeth_max=60, a cheaper variant of the reported query, to keep the two searches near 10s.
+    q = _repro_query(teeth_max=60)
+    coaxial = _search_keys(_repro_query(teeth_max=60, coaxial=True))
+    general = _search_keys(q)
+    assert coaxial, 'the coaxial search must find trains here or this test is vacuous'
+    assert coaxial <= general, f'general search missed coaxial trains: {coaxial - general}'
+
+
+def test_search_finds_the_reported_deep_reduction_train():
+    # The exact train from the bug report: 60:1 in 4 monotonic step-down stages, every tooth
+    # sum 68, end gears within 12-44, clearance 2. The coaxial search found it; the general
+    # search returned ZERO trains. It is reachable only via the coaxial-merge -- budget-fair
+    # exploration alone does not reach it (verified: that finds 10 other trains, not this one).
+    res = gt.search(_repro_query())
+    keys = {tuple(sorted((s.driving, s.driven) for s in t.stages)) for t in res.trains}
+    assert ((12, 56), (17, 51), (17, 51), (28, 40)) in keys
+
+
+def _first_stage_counts(trains):
+    counts = {}
+    for t in trains:
+        key = (t.stages[0].driving, t.stages[0].driven)
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def test_diverse_demotes_over_quota_trains_instead_of_dropping_them():
+    # Unit test on the helper. Six trains share first stage (10,20) and one has (30,15).
+    # With per_first=2, the four over-quota (10,20) trains move to the TAIL -- the list keeps
+    # all seven, it is only reordered.
+    clones = [gt.GearTrain((gt.Stage(10, 20), gt.Stage(30, 15 + i))) for i in range(6)]
+    other = gt.GearTrain((gt.Stage(30, 15), gt.Stage(10, 20)))
+    result = gt._diverse(clones + [other], per_first=2, cap=100)
+    assert len(result) == 7, 'nothing may be dropped below the cap'
+    assert result[2] is other, 'the distinct first stage must be promoted past the clones'
+    assert result[:2] == clones[:2]
+
+
+def test_diverse_truncates_to_the_cap():
+    clones = [gt.GearTrain((gt.Stage(10, 20), gt.Stage(30, 15 + i))) for i in range(10)]
+    assert len(gt._diverse(clones, per_first=3, cap=4)) == 4
+
+
+def test_search_caps_results_per_first_stage():
+    # The palette's first-use default fills the 200-cap. Before the diversity cap, 9 results
+    # shared one displayed first stage across 115 distinct ones; after, at most 5.
+    q = _valid_query(target_num=12, target_den=1, min_stages=1, max_stages=3,
+                     teeth_min=8, teeth_max=90)
+    res = gt.search(q)
+    assert len(res.trains) == gt.MAX_RESULTS
+    counts = _first_stage_counts(res.trains)
+    assert max(counts.values()) <= gt.MAX_PER_FIRST_STAGE
+    assert len(counts) >= 100, 'expected the results to span many distinct first stages'
+
+
+def test_diversity_cap_keeps_every_train_when_under_the_result_cap():
+    # The cap DEMOTES, it never deletes: with a pool smaller than MAX_RESULTS every train is
+    # still returned. Verified: 2:1 over 6..12 up to 3 stages yields exactly 44 trains, 8 of
+    # which share one first stage -- more than MAX_PER_FIRST_STAGE, and all 8 must survive.
+    # This is also the guard that the display cap never shrinks the pool the parity tests
+    # compare against.
+    q = _valid_query(target_num=2, target_den=1, min_stages=1, max_stages=3,
+                     teeth_min=6, teeth_max=12)
+    res = gt.search(q)
+    assert len(res.trains) == 44
+    assert max(_first_stage_counts(res.trains).values()) > gt.MAX_PER_FIRST_STAGE
+    assert not res.truncated, 'the diversity cap must never flag truncation'
+
+
+def _general_pass_truncated(q):
+    """Run ONLY the general (non-coaxial) pass of `q`, as search() does, and return its
+    truncation flag -- the reference the merged flag must match."""
+    qn, _ = gt.normalize(q)
+    return gt._collect(qn, {}, gt.MAX_RESULTS)[0]
+
+
+def test_search_truncation_reflects_only_the_general_pass():
+    # The coaxial-merge must never raise the partial-results flag on its own. If the general
+    # pass was exhaustive it already contains every coaxial train that exists, so the probe
+    # running out of budget says nothing about the user's query -- and the palette renders
+    # truncated=True as directive advice ("narrow the tooth range"), which would be wrong.
+    # Structural guard: _merge_coaxial has no truncation channel at all -- it returns only a
+    # dropped count. This is what makes the property below hold by construction, and it fails
+    # loudly if someone re-adds truncation to its return value.
+    dropped = gt._merge_coaxial(_repro_query(teeth_max=60), {})
+    assert isinstance(dropped, int), \
+        f'_merge_coaxial must report only a dropped count, got {dropped!r}'
+
+    for q in (_valid_query(target_num=1, target_den=6, min_stages=1, max_stages=2,
+                           teeth_min=6, teeth_max=24),
+              _valid_query(target_num=2, target_den=1, min_stages=1, max_stages=3,
+                           teeth_min=6, teeth_max=12),
+              _valid_query(target_num=1, target_den=60, min_stages=1, max_stages=2,
+                           teeth_min=6, teeth_max=60),
+              _repro_query()):
+        assert gt.search(q).truncated == _general_pass_truncated(q), \
+            f'truncation flag diverged from the general pass for {q}'
+
+
+def test_coaxial_merge_is_skipped_once_the_pool_is_full():
+    # Documents the merge gate's scope, so nobody reads buildable >= coaxial as unconditional.
+    # On the palette default the general pass alone overflows MAX_RESULTS, so the coaxial pass
+    # never runs and some coaxial trains are absent from the pool. That is deliberate: the
+    # extra pass costs ~6s on wide queries, every train in the full pool has <= 2 stages and
+    # outranks late 3-stage coaxial finds on _sort_key, and such a search already reports
+    # truncated=True so the user knows the list is partial.
+    q = _valid_query(target_num=12, target_den=1, min_stages=1, max_stages=3,
+                     teeth_min=8, teeth_max=90)
+    res = gt.search(q)
+    assert res.truncated, 'this query must overflow the cap or the test is vacuous'
+    seen = {}
+    gt._collect(*(gt.normalize(q)[0], seen, gt.MAX_RESULTS))
+    assert len(seen) >= gt.MAX_RESULTS, 'the general pass alone must fill the pool here'
+
+
+def test_search_is_deterministic():
+    # Budget-fair exploration picks its visit order with _spread (bit reversal), not an RNG,
+    # and iterative broadening is a fixed schedule -- so repeated searches must be identical
+    # down to the ORDER of the results, not just the set. The palette re-runs searches freely,
+    # so a user changing an unrelated input and changing it back must see the same list.
+    q = _repro_query(teeth_max=60)
+    first = [tuple((s.driving, s.driven) for s in t.stages) for t in gt.search(q).trains]
+    second = [tuple((s.driving, s.driven) for s in t.stages) for t in gt.search(q).trains]
+    assert first, 'expected results or this test is vacuous'
+    assert first == second
+
+
+def test_search_deep_reduction_query_terminates_fast():
+    # The reported query runs a budget-fair general pass AND a coaxial-merge pass (the general
+    # pass comes up far short of the 200-cap, so the merge fires). The palette blocks while
+    # this runs, so guard the ceiling. Also re-checks that every constraint still holds on the
+    # trains this newly-reachable region produces.
+    t0 = time.perf_counter()
+    res = gt.search(_repro_query())
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 25.0, f'deep-reduction search took {elapsed:.1f}s'
+    assert res.trains
+    assert all(t.ratio() == Fraction(1, 60) for t in res.trains)
+    for t in res.trains:
+        assert gt._clearance_ok(t.stages, 2)                # still single-plane buildable
+        assert 12 <= t.stages[0].driving <= 44              # input bound honored
+        assert 12 <= t.stages[-1].driven <= 44              # output bound honored
+        assert all(s.driving < s.driven for s in t.stages)  # monotonic step-down
+        assert len(t.stages) == 4                           # exactly the requested stage count
+
+
+def test_validate_rejects_too_many_teeth():
+    errs = gt.validate(_valid_query(teeth_max=gt.MAX_TEETH + 1))
+    assert any('tooth' in e.lower() for e in errs)
+
+
+def test_validate_accepts_the_tooth_limits_exactly():
+    # The limits are inclusive.
+    assert gt.validate(_valid_query(teeth_min=gt.MIN_TEETH, teeth_max=gt.MAX_TEETH)) == []
+
+
+def test_searchable_stage_counts_honours_parity_and_coaxial():
+    q = _valid_query(min_stages=1, max_stages=4)
+    assert gt._searchable_stage_counts(q) == [1, 2, 3, 4]
+    assert gt._searchable_stage_counts(_valid_query(
+        min_stages=1, max_stages=4, direction='same')) == [2, 4]
+    assert gt._searchable_stage_counts(_valid_query(
+        min_stages=1, max_stages=4, direction='opposite')) == [1, 3]
+    # Coaxial needs >= 2 stages, matching what normalize() enforces.
+    assert gt._searchable_stage_counts(_valid_query(
+        min_stages=1, max_stages=3, coaxial=True)) == [2, 3]
+
+
+def test_validate_rejects_unreachable_ratio():
+    # 3600:1 in 2 stages over teeth 8-150: each stage reaches at most 150/8 = 18.75x, so two
+    # stages reach 351.6x -- far short of 3600. The message must name the stages needed (3).
+    errs = gt.validate(_valid_query(target_num=3600, target_den=1, min_stages=2, max_stages=2,
+                                    teeth_min=8, teeth_max=150))
+    assert errs, 'an unreachable ratio must be rejected'
+    assert any('not reachable' in e for e in errs)
+    assert any('at least 3 stages' in e for e in errs)
+
+
+def test_validate_accepts_reachable_ratio():
+    # The same 3600:1 target with enough stages: 18.75**4 is ~123000 >= 3600.
+    assert gt.validate(_valid_query(target_num=3600, target_den=1, min_stages=4, max_stages=4,
+                                    teeth_min=8, teeth_max=150)) == []
+
+
+def test_validate_reachability_respects_direction_parity():
+    # direction='same' searches only EVEN stage counts, so the suggested minimum must be even
+    # too. 3600:1 needs 3 stages by magnitude, but 'same' cannot use 3 -> it must say 4.
+    errs = gt.validate(_valid_query(target_num=3600, target_den=1, min_stages=2, max_stages=2,
+                                    teeth_min=8, teeth_max=150, direction='same'))
+    assert any('at least 4 stages' in e for e in errs)
+
+
+def test_validate_rejects_when_no_stage_count_matches_the_direction():
+    # 'same' needs an even stage count, but the range 3..3 offers only an odd one.
+    errs = gt.validate(_valid_query(min_stages=3, max_stages=3, direction='same'))
+    assert errs
+    assert any('reverses rotation' in e for e in errs)
+
+
+def test_validate_rejects_single_tooth_count_range():
+    # teeth_min == teeth_max makes every stage 1:1, so nothing but 1:1 is reachable.
+    errs = gt.validate(_valid_query(teeth_min=20, teeth_max=20))
+    assert any('1:1' in e for e in errs)
+
+
+def test_search_reports_unreachable_ratio_as_an_error():
+    # End to end: an unreachable query is an ERROR with an explanation, not a slow empty list.
+    res = gt.search(_valid_query(target_num=3600, target_den=1, min_stages=2, max_stages=2,
+                                 teeth_min=8, teeth_max=150))
+    assert res.error is not None
+    assert res.trains == []

@@ -30,7 +30,8 @@ document.getElementById('query').addEventListener('submit', function (evt) {
     teeth_max: intVal('teeth_max'),
     direction: document.getElementById('direction').value,
     coaxial: document.getElementById('coaxial').checked,
-    monotonic: document.getElementById('monotonic').checked
+    monotonic: document.getElementById('monotonic').checked,
+    clearance: intVal('clearance')
   };
   // End-gear bounds: include only when the checkbox is on, and require both fields then.
   if (document.getElementById('limit_input').checked) {

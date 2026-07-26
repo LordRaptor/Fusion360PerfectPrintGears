@@ -25,8 +25,8 @@
 
     <fieldset>
       <legend>Tooth count (all gears)</legend>
-      <label>min <input type="number" id="teeth_min" min="1" value="8"></label>
-      <label>max <input type="number" id="teeth_max" min="1" value="90"></label>
+      <label>min <input type="number" id="teeth_min" min="6" max="150" value="8"></label>
+      <label>max <input type="number" id="teeth_max" min="6" max="150" value="90"></label>
     </fieldset>
 
     <fieldset>
@@ -34,12 +34,12 @@
       <p class="hint">Bound the first (input) and last (output) gears separately.
         When set, each result's stages are ordered input &rarr; output.</p>
       <label><input type="checkbox" id="limit_input"> Limit input gear</label>
-      <label>min <input type="number" id="input_min" min="1" disabled></label>
-      <label>max <input type="number" id="input_max" min="1" disabled></label>
+      <label>min <input type="number" id="input_min" min="6" max="150" disabled></label>
+      <label>max <input type="number" id="input_max" min="6" max="150" disabled></label>
       <br>
       <label><input type="checkbox" id="limit_output"> Limit output gear</label>
-      <label>min <input type="number" id="output_min" min="1" disabled></label>
-      <label>max <input type="number" id="output_max" min="1" disabled></label>
+      <label>min <input type="number" id="output_min" min="6" max="150" disabled></label>
+      <label>max <input type="number" id="output_max" min="6" max="150" disabled></label>
     </fieldset>
 
     <fieldset>
@@ -54,6 +54,8 @@
       <label class="opt-row"><input type="checkbox" id="coaxial"> Coaxial input/output</label>
       <label class="opt-row" title="No reduction stages in a step-up train, and no step-up stages in a reduction train. Removes mixed-direction trimming trains.">
         <input type="checkbox" id="monotonic"> Same-direction stages only</label>
+      <label class="opt-row" title="Minimum tooth-sum gap a wheel keeps from the next arbor's shaft, so results are buildable in one frame. ~2 = one module of clearance; raise for fat arbors or long cycloidal addenda.">
+        Clearance (teeth) <input type="number" id="clearance" min="0" value="2"></label>
     </fieldset>
 
     <button type="submit" id="search">Search</button>
