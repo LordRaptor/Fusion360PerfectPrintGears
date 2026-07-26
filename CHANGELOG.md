@@ -2,6 +2,87 @@
 
 <!-- version list -->
 
+## v2.0.0 (2026-07-26)
+
+### Bug Fixes
+
+- **engine**: Merge coaxial trains into sparse general searches
+  ([`1cb7f21`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/1cb7f216cd6cd7cedd947ca2df35ae8950280a0d))
+
+- **engine**: Stop the coaxial probe from reporting truncation
+  ([`b3fbc25`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/b3fbc256d45b614c5cb9baef2923e346194fc838))
+
+### Documentation
+
+- Document result variety, the coaxial top-up, and the input limits
+  ([`247336c`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/247336c8f801a52bde2eb6431a40ee479e1fd1c3))
+
+- Document single-plane buildability and the clearance input
+  ([`902432a`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/902432a0f651d24697d9662edfaf6fe3f524b438))
+
+- **engine**: Update _enumerate docstring for the dropped return value
+  ([`3e9fbaf`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/3e9fbaf88a9c3f3b79418270093b752e7fd20493))
+
+### Features
+
+- **engine**: Add buildable-arrangement search
+  ([`055dba6`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/055dba688bb46b0bf17e9dcf5ff217427ebf4311))
+
+- **engine**: Add clearance field to TrainQuery
+  ([`ad6b88f`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/ad6b88ff3de5046709a1da6e79df52bb0a6186ef))
+
+- **engine**: Add deterministic low-discrepancy ordering helper
+  ([`23d4c2a`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/23d4c2afb0743c103e738143216e4ffb75d8e9e8))
+
+- **engine**: Add single-plane clearance predicate
+  ([`6ef4126`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/6ef4126a0d9b7b53e381e35af03aca18b33d2242))
+
+- **engine**: Cap how many results share one first stage
+  ([`75c908c`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/75c908c822059b8b1d9d09100881249f3f15c74a))
+
+- **engine**: Hard-limit tooth counts and reject unreachable ratios
+  ([`1c5dd67`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/1c5dd67dbfd033987b0fb5797c1afdf5e1cfc2d3))
+
+- **engine**: Require single-plane buildability in search
+  ([`fa7f191`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/fa7f1910d6aa79b2e2b09924636db6f7569e4ea9))
+
+- **engine**: Scale the work budget to the tooth range
+  ([`10bbb72`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/10bbb721da5dfb95650ec3a7652877174b256112))
+
+- **engine**: Spread the search budget across first stages
+  ([`f16ba95`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/f16ba953a4e5d8fa570d3071bd1464ccf355bc90))
+
+- **engine**: Warn when buildability empties the result set
+  ([`2d825eb`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/2d825eb9b9a1baf1576410e9c77d70b60f3a0d38))
+
+- **fusion**: Add clearance input to the gear-train palette
+  ([`a152415`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/a1524151d9563b99b9e44922689ace157060380a))
+
+### Refactoring
+
+- **engine**: Extract the stage-count loop from search
+  ([`474ef66`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/474ef66522d7ab252a35fc40e1120aba50159e6d))
+
+- **engine**: Hoist stage-candidate generation out of the DFS
+  ([`1db65ac`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/1db65acdd38910540d60721a53bef4327c17eedb))
+
+- **engine**: Match file f-string style and widen the _spread permutation test
+  ([`06b2078`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/06b2078a822f8579765de80bfa9cb0448c06cd83))
+
+- **engine**: Share one stage-multiset key helper
+  ([`371ec54`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/371ec5418985e7e60add0071ec965c98387a2979))
+
+### Testing
+
+- **engine**: Guard search determinism and deep-reduction runtime
+  ([`c6d8831`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/c6d8831804fed3ecbbee45995ae9030ec1d4df18))
+
+### Breaking Changes
+
+- **engine**: Teeth_min below 6 and teeth_max above 150 are now hard errors rather than a warning,
+  and MIN_TEETH_WARN is replaced by MIN_TEETH/MAX_TEETH.
+
+
 ## v1.12.0 (2026-07-19)
 
 ### Bug Fixes
