@@ -449,6 +449,34 @@ def _sort_key(train: GearTrain) -> tuple:
     return (len(train.stages), train.total_teeth(), _canonical(train))
 
 
+def _collect(q: TrainQuery, seen: dict, cap: int):
+    """Run the stage-count loop for `q`, filing trains into `seen` by canonical key.
+
+    Returns (truncated, dropped_total). Stops climbing once `seen` holds `cap` trains:
+    results sort by (num_stages, ...), so every higher-stage-count train sorts strictly
+    after these and can never enter the top MAX_RESULTS. More solutions may exist at higher
+    stage counts, so that early stop flags truncation.
+    """
+    truncated = False
+    dropped_total = 0
+    for n in range(q.min_stages, q.max_stages + 1):
+        if q.direction == 'same' and n % 2 != 0:
+            continue
+        if q.direction == 'opposite' and n % 2 == 0:
+            continue
+        level, level_truncated, level_dropped = _enumerate(q, n, limit=GENERATE_LIMIT,
+                                                           work_budget=_work_budget(q))
+        dropped_total += level_dropped
+        if level_truncated:
+            truncated = True          # a safety valve tripped -> this level was cut short
+        for train in level:
+            seen.setdefault(_canonical(train), train)
+        if len(seen) >= cap:
+            truncated = True
+            break
+    return truncated, dropped_total
+
+
 def search(q: TrainQuery) -> SearchResult:
     """Validate -> normalize -> generate across the stage-count range -> dedup -> order
     -> cap. Fewest stages first, then most compact (smallest total tooth count)."""
@@ -458,28 +486,7 @@ def search(q: TrainQuery) -> SearchResult:
 
     q, warnings = normalize(q)
     seen = {}
-    truncated = False
-    dropped_total = 0
-    for n in range(q.min_stages, q.max_stages + 1):
-        if q.direction == 'same' and n % 2 != 0:
-            continue
-        if q.direction == 'opposite' and n % 2 == 0:
-            continue
-        level, level_truncated, level_dropped = _enumerate(q, n, limit=GENERATE_LIMIT,
-                                                            work_budget=_work_budget(q))
-        dropped_total += level_dropped
-        if level_truncated:
-            truncated = True          # a safety valve tripped -> this level was cut short
-        for train in level:
-            key = _canonical(train)
-            if key not in seen:
-                seen[key] = train
-        if len(seen) >= MAX_RESULTS:
-            # Results sort by (num_stages, ...), so every higher-stage-count train sorts
-            # strictly after these -- it can never enter the top MAX_RESULTS. Stop
-            # climbing; more solutions may exist at higher stage counts, so flag truncation.
-            truncated = True
-            break
+    truncated, dropped_total = _collect(q, seen, MAX_RESULTS)
 
     trains = sorted(seen.values(), key=_sort_key)
     if len(trains) > MAX_RESULTS:
