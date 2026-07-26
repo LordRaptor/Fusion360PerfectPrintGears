@@ -488,6 +488,23 @@ def search(q: TrainQuery) -> SearchResult:
     seen = {}
     truncated, dropped_total = _collect(q, seen, MAX_RESULTS)
 
+    if not q.coaxial and len(seen) < MAX_RESULTS:
+        # Coaxial-merge. Every coaxial train is single-plane buildable, so the general
+        # (buildable) result set must contain the coaxial one -- but the coaxial rule
+        # collapses branching (b = S - a is a single candidate), letting it reach deep trains
+        # the general DFS cannot afford within the work budget. Run it and merge, which makes
+        # buildable >= coaxial hold soundly without an infeasible full enumeration.
+        # Only when the general pass came up short: a full pool would outrank these on
+        # compactness anyway, and the extra pass is not free (measured ~6s on wide queries).
+        coax_seen = {}
+        cq, _ = normalize(replace(q, coaxial=True))    # bumps min_stages to >= 2
+        coax_truncated, coax_dropped = _collect(cq, coax_seen, MAX_RESULTS)
+        dropped_total += coax_dropped
+        if coax_truncated:
+            truncated = True
+        for key, train in coax_seen.items():
+            seen.setdefault(key, train)
+
     trains = sorted(seen.values(), key=_sort_key)
     if len(trains) > MAX_RESULTS:
         truncated = True

@@ -1053,3 +1053,25 @@ def test_search_wide_tooth_range_still_finds_varied_trains():
     assert all(t.ratio() == Fraction(1, 60) for t in res.trains)
     assert len(_first_stages(res.trains)) >= 10, \
         f'wide-range results clustered on {len(_first_stages(res.trains))} first stage(s)'
+
+
+def test_search_general_results_include_the_coaxial_ones():
+    # Invariant: every coaxial train is single-plane buildable, so the general (buildable)
+    # search must be a SUPERSET of the coaxial one. Verified violated without the merge: the
+    # general search returns 72 trains here and misses BOTH of the 2 coaxial ones. Uses
+    # teeth_max=60, a cheaper variant of the reported query, to keep the two searches near 10s.
+    q = _repro_query(teeth_max=60)
+    coaxial = _search_keys(_repro_query(teeth_max=60, coaxial=True))
+    general = _search_keys(q)
+    assert coaxial, 'the coaxial search must find trains here or this test is vacuous'
+    assert coaxial <= general, f'general search missed coaxial trains: {coaxial - general}'
+
+
+def test_search_finds_the_reported_deep_reduction_train():
+    # The exact train from the bug report: 60:1 in 4 monotonic step-down stages, every tooth
+    # sum 68, end gears within 12-44, clearance 2. The coaxial search found it; the general
+    # search returned ZERO trains. It is reachable only via the coaxial-merge -- budget-fair
+    # exploration alone does not reach it (verified: that finds 10 other trains, not this one).
+    res = gt.search(_repro_query())
+    keys = {tuple(sorted((s.driving, s.driven) for s in t.stages)) for t in res.trains}
+    assert ((12, 56), (17, 51), (17, 51), (28, 40)) in keys
