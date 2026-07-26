@@ -21,27 +21,46 @@ MIN_TEETH = 6              # hard floor: a cycloidal pinion below this cannot be
 MAX_TEETH = 150            # hard ceiling: the search space grows ~quadratically with the tooth
                            #   span. A worst-case search at this span took ~13s when the limit
                            #   was set; the integer-arithmetic DFS (see candidates()) brought
-                           #   that to ~0.6s, so the ceiling now has a lot of headroom -- it is
-                           #   left where it is deliberately, as an untested-above limit
-GENERATE_LIMIT = 20000     # safety valve: max trains materialized per stage level (see _generate)
-WORK_BUDGET = 600_000      # safety valve: max stage placements explored per level (~0.16s at
-                           #   REFERENCE_SPAN, measured ~3.8M placements/s; loose targets forced
+                           #   that to ~0.6s, and WORK_BUDGET then spent part of that headroom
+                           #   on coverage instead (worst case now ~4.5s). The ceiling is left
+                           #   where it is deliberately, as an untested-above limit
+GENERATE_LIMIT = 20000     # safety valve: max trains materialized per stage level (see
+                           #   _generate). Measured inert at the current WORK_BUDGET -- the
+                           #   fattest level materializes ~1900 trains -- so it is a pure memory
+                           #   backstop, NOT a tuning knob for how much gets explored
+WORK_BUDGET = 4_800_000    # safety valve: max stage placements explored per level (~1.4s at
+                           #   REFERENCE_SPAN, measured ~3.5M placements/s; loose targets forced
                            #   to high stage counts return partial, truncation-flagged results
-                           #   rather than hanging -- narrow ranges)
+                           #   rather than hanging -- narrow ranges). Raised 8x from 600_000 once
+                           #   the integer DFS made placements ~21x cheaper: the old value was
+                           #   chosen against a ~13s worst case, and 8x spends part of that
+                           #   headroom on COVERAGE while keeping the worst case ~4.5s. Measured
+                           #   over an 8-query benchmark, distinct first stages on the queries
+                           #   that used to come back under MAX_RESULTS went 42 -> 157.
+                           #   ⚠️ Raising this changes WHICH trains are found (see
+                           #   FIRST_STAGE_SLICE) -- it is a design change, not a tuning nit.
 
-REFERENCE_SPAN = 80          # tooth-range span WORK_BUDGET was tuned against (e.g. teeth 8-90)
-MAX_WORK_BUDGET = 3_000_000  # ceiling on the scaled budget, so the palette stays responsive
+REFERENCE_SPAN = 80           # tooth-range span WORK_BUDGET was tuned against (e.g. teeth 8-90)
+MAX_WORK_BUDGET = 24_000_000  # ceiling on the scaled budget, so the palette stays responsive.
+                              #   Raised with WORK_BUDGET to keep the span scaling proportional.
+                              #   NOTE it does not currently bind: the widest legal query (span
+                              #   145, teeth 6-150) scales to ~15.8M, under this cap. It is a
+                              #   guard in case MAX_TEETH is ever raised, not an active valve --
+                              #   the real worst case is set by WORK_BUDGET x the span scale.
 
-FIRST_STAGE_SLICE = 2000   # budget-fair exploration: starting per-first-stage work allowance.
+FIRST_STAGE_SLICE = 4000   # budget-fair exploration: starting per-first-stage work allowance.
                            #   Each distinct first stage gets this many placements, then the
                            #   allowance doubles and the cut-short ones are revisited, until the
                            #   space is exhausted or the work budget is spent. Stops one
                            #   small-gear prefix from draining the whole budget (see _enumerate).
                            #   LOAD-BEARING and non-monotonic: a LARGER slice reaches FEWER
                            #   first stages before the budget runs out, which reproduces the very
-                           #   starvation this fixes (measured: at 20000 the deep-reduction
-                           #   regression test finds nothing again). Retuning it must be
-                           #   validated by sweeping the value, not just by running the suite.
+                           #   starvation this fixes. Its optimum tracks WORK_BUDGET -- it was
+                           #   2000 at the 600_000 budget, and a joint sweep at 4_800_000 put the
+                           #   peak here (distinct first stages on the sparse benchmark queries:
+                           #   146 at 2000, 157 at 4000, 112 at 12000, 92 at 40000). Retuning
+                           #   either constant must be validated by sweeping BOTH, not just by
+                           #   running the suite.
 
 MAX_PER_FIRST_STAGE = 5    # display-only: at most this many results share one input-stage gear
                            #   pair before the rest are demoted to the tail (see _diverse)
@@ -565,10 +584,9 @@ def _collect(q: TrainQuery, seen: dict, cap: int):
     results sort by (num_stages, ...), so every higher-stage-count train sorts strictly
     after these and can never enter the top MAX_RESULTS. More solutions may exist at higher
     stage counts, so that early stop flags truncation. Conversely truncated=False means the
-    whole stage range was enumerated exhaustively -- callers rely on that (see _merge_coaxial).
+    whole stage range was enumerated exhaustively.
 
-    `dropped_total` is only ever used as a boolean ("did buildability empty the results?"), so
-    when a caller sums it across passes the total may double-count a train both found.
+    `dropped_total` is only ever used as a boolean ("did buildability empty the results?").
     """
     truncated = False
     dropped_total = 0
@@ -614,37 +632,22 @@ def _diverse(trains: list, per_first: int, cap: int) -> list:
     return (kept + overflow)[:cap]
 
 
-def _merge_coaxial(q: TrainQuery, seen: dict) -> int:
-    """Merge the coaxial variant of `q` into `seen`; return its dropped-train count.
-
-    Whatever the coaxial pass returns has already passed the same buildability gate as the
-    general pass, so every one of its trains belongs in the general result set. But the
-    coaxial rule collapses branching (driven = S - driving is a single candidate), letting it
-    reach deep trains the general DFS cannot afford within its work budget -- so without this
-    merge, turning the coaxial option ON could surface a train the general search missed.
-    (Equal tooth sums make the gap at each arbor exactly the neighbouring gear's tooth count,
-    so a coaxial train is buildable iff every gear has at least `clearance` teeth -- true of
-    any real gear at the default clearance of 2. Only clearance > teeth_min breaks it, e.g.
-    (6,60)+(30,36) at clearance 7. The gate below is what guarantees validity regardless.)
-
-    Deliberately does NOT report truncation. If the general pass was exhaustive it already
-    contains every coaxial train that exists, so the probe running out of budget tells the
-    user nothing; and if the general pass was truncated the flag is already set. Propagating
-    it would raise a partial-results warning -- which the palette renders as directive advice
-    to narrow the search -- for a query that was in fact answered completely.
-    """
-    coax_seen = {}
-    cq, _ = normalize(replace(q, coaxial=True))    # bumps min_stages to >= 2
-    _, coax_dropped = _collect(cq, coax_seen, MAX_RESULTS)
-    for key, train in coax_seen.items():
-        seen.setdefault(key, train)
-    return coax_dropped
-
-
 def search(q: TrainQuery) -> SearchResult:
-    """Validate -> normalize -> search the stage-count range -> merge in coaxial trains if the
-    pool came up short -> dedup -> order fewest-stages-then-most-compact -> spread the head
-    across distinct first stages -> cap at MAX_RESULTS."""
+    """Validate -> normalize -> search the stage-count range -> dedup -> order
+    fewest-stages-then-most-compact -> spread the head across distinct first stages ->
+    cap at MAX_RESULTS.
+
+    A general (non-coaxial) search does NOT top itself up with coaxial trains. It used to:
+    when the work budget was 600_000 the general DFS could be starved to the point of
+    returning nothing at all on a deep reduction, and re-running the search with the coaxial
+    rule -- which collapses each stage after the first to a single candidate -- was a cheap way
+    to salvage some results. That was a crutch for a starved search, and the 8x budget (itself
+    affordable only because the DFS runs on ints now) removed the starvation it worked around:
+    the same queries return pools of 50-1900 trains. Coaxial trains are a deliberately
+    requestable SUBSET, which is what the coaxial option is for -- so a general search that
+    does not happen to surface one is correct, not a gap. Dropping the top-up also halves the
+    worst-case search time, since it re-ran the whole stage-count loop a second time.
+    """
     errors = validate(q)
     if errors:
         return SearchResult(trains=[], truncated=False, warnings=(), error='; '.join(errors))
@@ -652,16 +655,6 @@ def search(q: TrainQuery) -> SearchResult:
     q, warnings = normalize(q)
     seen = {}
     truncated, dropped_total = _collect(q, seen, MAX_RESULTS)
-
-    if not q.coaxial and len(seen) < MAX_RESULTS:
-        # Only when the general pass came up short. The extra pass is not free (measured ~0.3s
-        # on wide queries), and a full pool is dominated by low-stage-count trains that
-        # outrank late coaxial finds on _sort_key. NOTE that is a practical argument, not a
-        # guarantee: when the pool filled from a level that was itself cut short, the 200+
-        # trains in it are an arbitrary slice of that level, so a more compact coaxial train
-        # could in principle be missed here. Such a search already reports truncated=True, so
-        # the user is told the list is partial. Widening this gate would cost the common case.
-        dropped_total += _merge_coaxial(q, seen)
 
     trains = sorted(seen.values(), key=_sort_key)
     if len(trains) > MAX_RESULTS:

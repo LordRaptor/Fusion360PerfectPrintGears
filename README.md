@@ -129,9 +129,9 @@ sum (∝ center distance) helps you judge gear sizes when picking a solution. Re
 by construction and ordered fewest-stages-then-most-compact, capped at 200. To keep that list
 useful rather than 200 variations on one layout, at most **five** results share the same input
 gear pair before the rest are moved to the end — nothing is discarded, the variety just comes
-first. When a search comes back with few results it is automatically topped up with any coaxial
-trains it can find, so turning **Coaxial input/output** on can never surface a train the general
-search missed.
+first. **Coaxial input/output** is a genuine subset of the search space rather than a filter on
+the general result, so ticking it can surface trains a general search did not list — that is what
+the option is for.
 
 Tooth counts are limited to **6–150**: below 6 a cycloidal pinion cannot practically be made,
 and beyond 150 the search space grows faster than it can be explored. There is no limit on the
