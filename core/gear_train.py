@@ -229,15 +229,17 @@ def _spread(items) -> list:
 def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
     """Enumerate exact `n`-stage trains; return (trains, truncated, dropped).
 
-    `dropped` counts exact trains rejected for having no single-plane-buildable arrangement.
+    `dropped` counts distinct exact trains rejected for having no single-plane-buildable
+    arrangement.
 
     All exact `n`-stage trains over [teeth_min, teeth_max], both directions.
     When q.coaxial is set, the first stage fixes the tooth sum S and every later stage
     must satisfy driving + driven == S (equal center distance at one module).
 
     Stages are placed in canonical non-decreasing (driving, driven) order, so each stage
-    multiset is emitted exactly once -- no n! reorderings (the raw list is already
-    duplicate-free). `search()` still dedups across stage counts as a backstop.
+    multiset is reached exactly once. Results are collected in a dict keyed by that multiset
+    so that re-exploring a subtree (see the budget-fair driver in the next task) cannot
+    produce duplicates. `search()` still dedups across stage counts as a backstop.
 
     Recursion: `remaining` is the product the not-yet-placed stages must still equal.
     Placing stage (a, b) consumes a factor, leaving remaining * b / a for the rest.
@@ -251,11 +253,10 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
     number of trains materialized (memory); `work_budget` caps stage placements explored
     (time). Gear-train search is NP-hard in general and loose targets over wide ranges
     have astronomically many exact solutions; since search() only keeps MAX_RESULTS,
-    there is no point exploring further. The known-better algorithm for the overlapping
-    subproblems is DP/memoization on the remaining-ratio state, but with a small result
-    cap the bounded DFS is sufficient.
+    there is no point exploring further.
     """
-    out = []
+    out = {}                             # stage-multiset key -> GearTrain (dedups re-exploration)
+    dropped = set()                      # keys of exact trains with no buildable arrangement
     L, H = q.teeth_min, q.teeth_max
     in_lo = q.input_min if q.input_min is not None else L
     in_hi = q.input_max if q.input_max is not None else H
@@ -267,33 +268,20 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
     step_up = q.monotonic and target > 1     # every stage must be driving > driven
     step_down = q.monotonic and target < 1   # every stage must be driving < driven
     work = [0]                           # stage placements explored; bounded by work_budget
-    dropped = [0]                        # exact trains with no buildable arrangement
 
     def stop() -> bool:
         return ((limit is not None and len(out) >= limit) or
                 (work_budget is not None and work[0] >= work_budget))
 
-    def recurse(remaining: Fraction, k: int, stages: tuple, coax_sum, prev):
-        if stop():
-            return
-        if k == 0:
-            if remaining == 1:
-                if not q.monotonic and not _is_irreducible(stages):
-                    return                    # reducible -> drop, do not count
-                # Always-on single-plane buildability: keep the train only if some ordering
-                # satisfies the end-gear bounds AND the clearance rule; store it in that
-                # order (input -> output). in_lo..out_hi default to the full range when no
-                # end bounds are set, so this also picks a buildable display order.
-                arranged = _arrange_buildable(stages, in_lo, in_hi, out_lo, out_hi,
-                                              q.clearance)
-                if arranged is not None:
-                    out.append(GearTrain(arranged))
-                else:
-                    dropped[0] += 1       # exact but not single-plane buildable
-            return
+    def candidates(remaining, k, coax_sum, prev):
+        """Yield the (a, b) stages placeable at depth k, in canonical ascending order.
+
+        Charges the work counter exactly as the old inline loops did: one unit per `a`
+        slice computed, one per `b` scanned.
+        """
+        pa, pb = prev                    # last placed stage; enforce (a, b) >= (pa, pb)
         lo = Fraction(L, H) ** (k - 1)   # child ratio-range lower bound
         hi = Fraction(H, L) ** (k - 1)   # child ratio-range upper bound
-        pa, pb = prev                    # last placed stage; enforce (a, b) >= (pa, pb)
         for a in range(max(L, pa), H + 1):
             work[0] += 1                 # count the per-a slice computation (bounds time)
             # child remaining = remaining * b / a must be in [lo, hi]  =>
@@ -311,24 +299,45 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
                 # single candidate instead of scanning (and rejecting) the whole slice.
                 b = coax_sum - a
                 if b_lo <= b <= b_hi and b != a:   # skip 1:1 (pass-through) stages
-                    recurse(remaining * Fraction(b, a), k - 1,
-                            stages + (Stage(a, b),), coax_sum, (a, b))
+                    yield a, b
             else:
                 for b in range(b_lo, b_hi + 1):
                     work[0] += 1
-                    if b == a:                     # skip 1:1 (pass-through) stages
-                        continue
-                    # The first stage of a coaxial search fixes the shared sum S.
-                    next_sum = a + b if q.coaxial else None
-                    recurse(remaining * Fraction(b, a), k - 1,
-                            stages + (Stage(a, b),), next_sum, (a, b))
+                    if b != a:                     # skip 1:1 (pass-through) stages
+                        yield a, b
+
+    def leaf(stages):
+        """Gate a completed exact train and file it under its stage-multiset key."""
+        if not q.monotonic and not _is_irreducible(stages):
+            return                        # reducible -> drop, do not count
+        key = tuple(sorted((s.driving, s.driven) for s in stages))
+        # Always-on single-plane buildability: keep the train only if some ordering
+        # satisfies the end-gear bounds AND the clearance rule; store it in that order
+        # (input -> output). in_lo..out_hi default to the full range when no end bounds
+        # are set, so this also picks a buildable display order.
+        arranged = _arrange_buildable(stages, in_lo, in_hi, out_lo, out_hi, q.clearance)
+        if arranged is not None:
+            out.setdefault(key, GearTrain(arranged))
+        else:
+            dropped.add(key)              # exact but not single-plane buildable
+
+    def recurse(remaining: Fraction, k: int, stages: tuple, coax_sum, prev):
+        if stop():
+            return
+        if k == 0:
+            if remaining == 1:
+                leaf(stages)
+            return
+        for a, b in candidates(remaining, k, coax_sum, prev):
+            # The first stage of a coaxial search fixes the shared sum S.
+            next_sum = coax_sum if coax_sum is not None else (a + b if q.coaxial else None)
+            recurse(remaining * Fraction(b, a), k - 1,
+                    stages + (Stage(a, b),), next_sum, (a, b))
             if stop():
                 return
 
     recurse(target, n, (), None, (0, 0))
-    truncated = ((limit is not None and len(out) >= limit) or
-                 (work_budget is not None and work[0] >= work_budget))
-    return out, truncated, dropped[0]
+    return list(out.values()), stop(), len(dropped)
 
 
 def _generate(q: TrainQuery, n: int, limit=None, work_budget=None) -> list:
