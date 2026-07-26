@@ -458,7 +458,11 @@ def _collect(q: TrainQuery, seen: dict, cap: int):
     Returns (truncated, dropped_total). Stops climbing once `seen` holds `cap` trains:
     results sort by (num_stages, ...), so every higher-stage-count train sorts strictly
     after these and can never enter the top MAX_RESULTS. More solutions may exist at higher
-    stage counts, so that early stop flags truncation.
+    stage counts, so that early stop flags truncation. Conversely truncated=False means the
+    whole stage range was enumerated exhaustively -- callers rely on that (see _merge_coaxial).
+
+    `dropped_total` is only ever used as a boolean ("did buildability empty the results?"), so
+    when a caller sums it across passes the total may double-count a train both found.
     """
     truncated = False
     dropped_total = 0
@@ -468,7 +472,7 @@ def _collect(q: TrainQuery, seen: dict, cap: int):
         if q.direction == 'opposite' and n % 2 == 0:
             continue
         level, level_truncated, level_dropped = _enumerate(q, n, limit=GENERATE_LIMIT,
-                                                           work_budget=_work_budget(q))
+                                                          work_budget=_work_budget(q))
         dropped_total += level_dropped
         if level_truncated:
             truncated = True          # a safety valve tripped -> this level was cut short
@@ -504,9 +508,37 @@ def _diverse(trains: list, per_first: int, cap: int) -> list:
     return (kept + overflow)[:cap]
 
 
+def _merge_coaxial(q: TrainQuery, seen: dict) -> int:
+    """Merge the coaxial variant of `q` into `seen`; return its dropped-train count.
+
+    Whatever the coaxial pass returns has already passed the same buildability gate as the
+    general pass, so every one of its trains belongs in the general result set. But the
+    coaxial rule collapses branching (driven = S - driving is a single candidate), letting it
+    reach deep trains the general DFS cannot afford within its work budget -- so without this
+    merge, turning the coaxial option ON could surface a train the general search missed.
+    (Equal tooth sums make the gap at each arbor exactly the neighbouring gear's tooth count,
+    so a coaxial train is buildable iff every gear has at least `clearance` teeth -- true of
+    any real gear at the default clearance of 2. Only clearance > teeth_min breaks it, e.g.
+    (6,60)+(30,36) at clearance 7. The gate below is what guarantees validity regardless.)
+
+    Deliberately does NOT report truncation. If the general pass was exhaustive it already
+    contains every coaxial train that exists, so the probe running out of budget tells the
+    user nothing; and if the general pass was truncated the flag is already set. Propagating
+    it would raise a partial-results warning -- which the palette renders as directive advice
+    to narrow the search -- for a query that was in fact answered completely.
+    """
+    coax_seen = {}
+    cq, _ = normalize(replace(q, coaxial=True))    # bumps min_stages to >= 2
+    _, coax_dropped = _collect(cq, coax_seen, MAX_RESULTS)
+    for key, train in coax_seen.items():
+        seen.setdefault(key, train)
+    return coax_dropped
+
+
 def search(q: TrainQuery) -> SearchResult:
-    """Validate -> normalize -> generate across the stage-count range -> dedup -> order
-    -> cap. Fewest stages first, then most compact (smallest total tooth count)."""
+    """Validate -> normalize -> search the stage-count range -> merge in coaxial trains if the
+    pool came up short -> dedup -> order fewest-stages-then-most-compact -> spread the head
+    across distinct first stages -> cap at MAX_RESULTS."""
     errors = validate(q)
     if errors:
         return SearchResult(trains=[], truncated=False, warnings=(), error='; '.join(errors))
@@ -516,25 +548,21 @@ def search(q: TrainQuery) -> SearchResult:
     truncated, dropped_total = _collect(q, seen, MAX_RESULTS)
 
     if not q.coaxial and len(seen) < MAX_RESULTS:
-        # Coaxial-merge. Every coaxial train is single-plane buildable, so the general
-        # (buildable) result set must contain the coaxial one -- but the coaxial rule
-        # collapses branching (b = S - a is a single candidate), letting it reach deep trains
-        # the general DFS cannot afford within the work budget. Run it and merge, which makes
-        # buildable >= coaxial hold soundly without an infeasible full enumeration.
-        # Only when the general pass came up short: a full pool would outrank these on
-        # compactness anyway, and the extra pass is not free (measured ~6s on wide queries).
-        coax_seen = {}
-        cq, _ = normalize(replace(q, coaxial=True))    # bumps min_stages to >= 2
-        coax_truncated, coax_dropped = _collect(cq, coax_seen, MAX_RESULTS)
-        dropped_total += coax_dropped
-        if coax_truncated:
-            truncated = True
-        for key, train in coax_seen.items():
-            seen.setdefault(key, train)
+        # Only when the general pass came up short. The extra pass is not free (measured ~6s
+        # on wide queries), and a full pool is dominated by low-stage-count trains that
+        # outrank late coaxial finds on _sort_key. NOTE that is a practical argument, not a
+        # guarantee: when the pool filled from a level that was itself cut short, the 200+
+        # trains in it are an arbitrary slice of that level, so a more compact coaxial train
+        # could in principle be missed here. Such a search already reports truncated=True, so
+        # the user is told the list is partial. Widening this gate would cost the common case.
+        dropped_total += _merge_coaxial(q, seen)
 
     trains = sorted(seen.values(), key=_sort_key)
     if len(trains) > MAX_RESULTS:
-        truncated = True          # the POOL overflowed -- the diversity cap below never sets this
+        # The POOL overflowed. _diverse only ever reorders and then slices to this same
+        # MAX_RESULTS, so it cannot drop a train without this flag already being set -- keep
+        # the two uses of MAX_RESULTS below in step with this check.
+        truncated = True
     trains = _diverse(trains, MAX_PER_FIRST_STAGE, MAX_RESULTS)
     if not trains and dropped_total:
         warnings.append(BUILDABILITY_EMPTY_WARNING)

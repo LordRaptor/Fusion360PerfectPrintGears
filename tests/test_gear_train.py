@@ -1126,3 +1126,49 @@ def test_diversity_cap_keeps_every_train_when_under_the_result_cap():
     assert len(res.trains) == 44
     assert max(_first_stage_counts(res.trains).values()) > gt.MAX_PER_FIRST_STAGE
     assert not res.truncated, 'the diversity cap must never flag truncation'
+
+
+def _general_pass_truncated(q):
+    """Run ONLY the general (non-coaxial) pass of `q`, as search() does, and return its
+    truncation flag -- the reference the merged flag must match."""
+    qn, _ = gt.normalize(q)
+    return gt._collect(qn, {}, gt.MAX_RESULTS)[0]
+
+
+def test_search_truncation_reflects_only_the_general_pass():
+    # The coaxial-merge must never raise the partial-results flag on its own. If the general
+    # pass was exhaustive it already contains every coaxial train that exists, so the probe
+    # running out of budget says nothing about the user's query -- and the palette renders
+    # truncated=True as directive advice ("narrow the tooth range"), which would be wrong.
+    # Structural guard: _merge_coaxial has no truncation channel at all -- it returns only a
+    # dropped count. This is what makes the property below hold by construction, and it fails
+    # loudly if someone re-adds truncation to its return value.
+    dropped = gt._merge_coaxial(_repro_query(teeth_max=60), {})
+    assert isinstance(dropped, int), \
+        f'_merge_coaxial must report only a dropped count, got {dropped!r}'
+
+    for q in (_valid_query(target_num=1, target_den=6, min_stages=1, max_stages=2,
+                           teeth_min=6, teeth_max=24),
+              _valid_query(target_num=2, target_den=1, min_stages=1, max_stages=3,
+                           teeth_min=6, teeth_max=12),
+              _valid_query(target_num=1, target_den=60, min_stages=1, max_stages=2,
+                           teeth_min=6, teeth_max=60),
+              _repro_query()):
+        assert gt.search(q).truncated == _general_pass_truncated(q), \
+            f'truncation flag diverged from the general pass for {q}'
+
+
+def test_coaxial_merge_is_skipped_once_the_pool_is_full():
+    # Documents the merge gate's scope, so nobody reads buildable >= coaxial as unconditional.
+    # On the palette default the general pass alone overflows MAX_RESULTS, so the coaxial pass
+    # never runs and some coaxial trains are absent from the pool. That is deliberate: the
+    # extra pass costs ~6s on wide queries, every train in the full pool has <= 2 stages and
+    # outranks late 3-stage coaxial finds on _sort_key, and such a search already reports
+    # truncated=True so the user knows the list is partial.
+    q = _valid_query(target_num=12, target_den=1, min_stages=1, max_stages=3,
+                     teeth_min=8, teeth_max=90)
+    res = gt.search(q)
+    assert res.truncated, 'this query must overflow the cap or the test is vacuous'
+    seen = {}
+    gt._collect(*(gt.normalize(q)[0], seen, gt.MAX_RESULTS))
+    assert len(seen) >= gt.MAX_RESULTS, 'the general pass alone must fill the pool here'
