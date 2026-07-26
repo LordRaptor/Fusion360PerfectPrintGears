@@ -975,3 +975,29 @@ def test_spread_prefix_covers_the_whole_range():
     prefix = order[:8]
     assert max(prefix) > 50, f'prefix stayed in the low corner: {prefix}'
     assert len({p // 25 for p in prefix}) >= 3, f'prefix did not cover quarters: {prefix}'
+
+
+def _repro_query(**over):
+    """The user-reported deep-reduction query (design spec 2026-07-25, section 1).
+
+    Palette input: ratio 60:1, exactly 4 stages, teeth 12-90, input gear 12-44, output gear
+    12-44, rotation 'same as input', same-direction stages only, clearance 2. The engine's
+    ratio is driving/driven -- the RECIPROCAL of the UI's input:output -- hence 1/60.
+    """
+    base = dict(target_num=1, target_den=60, min_stages=4, max_stages=4,
+                teeth_min=12, teeth_max=90, direction='same',
+                input_min=12, input_max=44, output_min=12, output_max=44,
+                monotonic=True, clearance=2, coaxial=False)
+    base.update(over)
+    return gt.TrainQuery(**base)
+
+
+def test_search_reaches_large_first_stage_trains():
+    # Budget-fair exploration. Before it, this query returned ZERO trains: the DFS drained its
+    # whole 600k work budget into the small-driven corner (first stage (12,13)) and truncated
+    # before reaching any first stage with a large driven gear. Verified after: 10 trains, all
+    # built on a first stage of (12,45) or (18,54) -- deep in the ascending enumeration order.
+    res = gt.search(_repro_query())
+    assert res.trains, 'budget-fair exploration must reach this deep reduction'
+    keys = {tuple(sorted((s.driving, s.driven) for s in t.stages)) for t in res.trains}
+    assert ((12, 45), (12, 45), (12, 48), (30, 32)) in keys

@@ -19,6 +19,12 @@ WORK_BUDGET = 600_000      # safety valve: max stage placements explored per lev
                            #   case; loose targets forced to high stage counts return partial,
                            #   truncation-flagged results rather than hanging -- narrow ranges)
 
+FIRST_STAGE_SLICE = 2000   # budget-fair exploration: starting per-first-stage work allowance.
+                           #   Each distinct first stage gets this many placements, then the
+                           #   allowance doubles and the cut-short ones are revisited, until the
+                           #   space is exhausted or WORK_BUDGET is spent. Stops one small-gear
+                           #   prefix from draining the whole budget (see _enumerate).
+
 BUILDABILITY_EMPTY_WARNING = (
     'No single-frame-buildable train found. Try raising the end-gear limit, adding a '
     'stage, widening the tooth range, or lowering the clearance.')
@@ -277,10 +283,15 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
     step_up = q.monotonic and target > 1     # every stage must be driving > driven
     step_down = q.monotonic and target < 1   # every stage must be driving < driven
     work = [0]                           # stage placements explored; bounded by work_budget
+    slice_end = [None]                   # work[0] ceiling for the current first stage, or None
 
-    def stop() -> bool:
+    def over_budget() -> bool:
+        """A global safety valve tripped -- the whole enumeration is done."""
         return ((limit is not None and len(out) >= limit) or
                 (work_budget is not None and work[0] >= work_budget))
+
+    def stop() -> bool:
+        return over_budget() or (slice_end[0] is not None and work[0] >= slice_end[0])
 
     def candidates(remaining, k, coax_sum, prev):
         """Yield the (a, b) stages placeable at depth k, in canonical ascending order.
@@ -346,8 +357,37 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
             if stop():
                 return
 
-    recurse(target, n, (), None, (0, 0))
-    return list(out.values()), stop(), len(dropped)
+    if q.coaxial or n == 1:
+        # Nothing to spread: the coaxial rule already collapses branching to one candidate
+        # per stage, and a 1-stage train has no completion subtree below its first stage.
+        recurse(target, n, (), None, (0, 0))
+        cut_short = False
+    else:
+        # Budget-fair exploration (iterative broadening). Visit first stages in a
+        # low-discrepancy order so a short run still reaches the large-gear region, and cap
+        # each one's subtree; then double the allowance and revisit the ones that were cut
+        # off. Re-exploring repeats work, but `out`/`dropped` are keyed so it cannot
+        # duplicate results, and doubling bounds the redundancy to ~2x. When the space is
+        # small every first stage completes on some pass, `pending` empties, and the result
+        # set is exactly what an unbounded plain DFS would produce.
+        pending = _spread(list(candidates(target, n, None, (0, 0))))
+        allowance = FIRST_STAGE_SLICE
+        while pending and not over_budget():
+            retry = []
+            for a, b in pending:
+                if over_budget():
+                    retry.append((a, b))       # never explored this pass -> still unfinished
+                    continue
+                slice_end[0] = work[0] + allowance
+                recurse(target * Fraction(b, a), n - 1, (Stage(a, b),), None, (a, b))
+                if work[0] >= slice_end[0]:
+                    retry.append((a, b))       # hit its ceiling -> more of this subtree remains
+            slice_end[0] = None
+            pending = retry
+            allowance *= 2
+        cut_short = bool(pending)
+
+    return list(out.values()), over_budget() or cut_short, len(dropped)
 
 
 def _generate(q: TrainQuery, n: int, limit=None, work_budget=None) -> list:
