@@ -126,11 +126,23 @@ Results list each train's stages (`driving ÷ driven` tooth counts), the exact a
 (shown `input : output` to match the target you entered), gear count, rotation direction, and
 per-stage tooth sum. Following Steve Peterson's convention, the tooth
 sum (∝ center distance) helps you judge gear sizes when picking a solution. Results are exact
-by construction and ordered fewest-stages-then-most-compact, capped at 200. Gear-train ratio
-search is combinatorially large, so for loose targets over wide ranges the search is bounded
-for responsiveness and returns a **partial** list (flagged in the palette) — narrow the tooth
-range or stage count for a complete result. You read a result and set up the gears yourself
-(e.g. with the generator command).
+by construction and ordered fewest-stages-then-most-compact, capped at 200. To keep that list
+useful rather than 200 variations on one layout, at most **five** results share the same input
+gear pair before the rest are moved to the end — nothing is discarded, the variety just comes
+first. When a search comes back with few results it is automatically topped up with any coaxial
+trains it can find, so turning **Coaxial input/output** on can never surface a train the general
+search missed.
+
+Tooth counts are limited to **6–150**: below 6 a cycloidal pinion cannot practically be made,
+and beyond 150 the search space grows faster than it can be explored. There is no limit on the
+ratio or the stage count — instead, because one stage can change speed by at most
+`teeth_max ÷ teeth_min`, a target that no stage count in your range could reach is rejected
+straight away and tells you how many stages it would need (e.g. *"A 3600x speed change is not
+reachable in 2 stages with teeth 8-150 … It needs at least 3 stages."*). Gear-train ratio search
+is combinatorially large, so for loose targets over wide ranges the search is still bounded for
+responsiveness and returns a **partial** list (flagged in the palette) — narrow the tooth range
+or stage count for a complete result. You read a result and set up the gears yourself (e.g. with
+the generator command).
 
 ---
 
