@@ -7,21 +7,27 @@ its stage ratios. See docs/superpowers/specs/2026-06-28-gear-train-calculator-de
 """
 from __future__ import annotations
 
-import math
 from itertools import combinations, permutations
 from dataclasses import dataclass, field, replace
 from fractions import Fraction
+from math import gcd
+
+INF = float('inf')         # "no limit" sentinel for the search's work/result thresholds,
+                           #   so the hot-path checks stay bare integer comparisons
 
 MAX_RESULTS = 200          # hard cap on returned trains; truncation is reported, never silent
 MIN_TEETH = 6              # hard floor: a cycloidal pinion below this cannot be cut or printed,
                            #   and the generator command refuses to build one either
 MAX_TEETH = 150            # hard ceiling: the search space grows ~quadratically with the tooth
-                           #   span, and at this span a worst-case search already takes ~13s
-                           #   (the palette blocks for the whole search)
+                           #   span. A worst-case search at this span took ~13s when the limit
+                           #   was set; the integer-arithmetic DFS (see candidates()) brought
+                           #   that to ~0.6s, so the ceiling now has a lot of headroom -- it is
+                           #   left where it is deliberately, as an untested-above limit
 GENERATE_LIMIT = 20000     # safety valve: max trains materialized per stage level (see _generate)
-WORK_BUDGET = 600_000      # safety valve: max stage placements explored per level (~4s worst
-                           #   case; loose targets forced to high stage counts return partial,
-                           #   truncation-flagged results rather than hanging -- narrow ranges)
+WORK_BUDGET = 600_000      # safety valve: max stage placements explored per level (~0.16s at
+                           #   REFERENCE_SPAN, measured ~3.8M placements/s; loose targets forced
+                           #   to high stage counts return partial, truncation-flagged results
+                           #   rather than hanging -- narrow ranges)
 
 REFERENCE_SPAN = 80          # tooth-range span WORK_BUDGET was tuned against (e.g. teeth 8-90)
 MAX_WORK_BUDGET = 3_000_000  # ceiling on the scaled budget, so the palette stays responsive
@@ -333,7 +339,14 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
     so that re-exploring a subtree (see the budget-fair driver in the next task) cannot
     produce duplicates. `search()` still dedups across stage counts as a backstop.
 
-    Recursion: `remaining` is the product the not-yet-placed stages must still equal.
+    Recursion: `remaining` is the product the not-yet-placed stages must still equal, carried
+    as a normalized (numerator, denominator) pair of plain ints -- `rn`, `rd` -- NOT a
+    Fraction. The DFS only ever multiplies it by b/a, tests it against 1, and feeds its two
+    halves into an integer bound formula, so a rational object buys nothing here and costs an
+    allocation plus operator dispatch on every one of millions of steps (see candidates()).
+    Fraction is kept where the call counts are tiny and exactness has to be self-evident:
+    Stage.ratio(), _is_irreducible(), and the target/reporting arithmetic.
+
     Placing stage (a, b) consumes a factor, leaving remaining * b / a for the rest.
     Prune: after placing a stage, k-1 remain, so the child's remaining must lie in
     [(L/H)^(k-1), (H/L)^(k-1)]. Solving that for b bounds the inner loop to a slice of
@@ -355,51 +368,89 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
     out_lo = q.output_min if q.output_min is not None else L
     out_hi = q.output_max if q.output_max is not None else H
     target = Fraction(q.target_num, q.target_den)
+    tn, td = target.numerator, target.denominator   # the DFS threads the pair, not the object
     # R2 (monotonic): when set, tighten every stage to the target's speed direction.
     # target != 1 is guaranteed by validate() (1:1 targets are rejected).
     step_up = q.monotonic and target > 1     # every stage must be driving > driven
     step_down = q.monotonic and target < 1   # every stage must be driving < driven
-    work = [0]                           # stage placements explored; bounded by work_budget
-    slice_end = [None]                   # work[0] ceiling for the current first stage, or None
+    # Powers of the tooth bounds, for the ratio-range prune in candidates(): the child ratio
+    # bounds are (L/H)**(k-1) and (H/L)**(k-1), i.e. pow_L[k-1]/pow_H[k-1] and its reciprocal.
+    # Kept as separate integers rather than Fractions -- see candidates().
+    pow_L = [L ** i for i in range(n)]
+    pow_H = [H ** i for i in range(n)]
+
+    # The two safety valves, with "no limit" folded into an infinite threshold so the hot
+    # checks below are bare comparisons instead of `is not None` tests.
+    cap = limit if limit is not None else INF                 # trains materialized (memory)
+    budget = work_budget if work_budget is not None else INF  # stage placements (time)
+    work = 0            # stage placements explored; bounded by `budget`
+    slice_end = INF     # work ceiling for the current first stage (INF = no slice in force)
+    ceiling = budget    # == min(budget, slice_end); what stop() compares against
+
+    def set_slice(end):
+        """Set the current first-stage work ceiling, keeping stop()'s threshold in step.
+        `end` is INF to lift the slice. Kept as one function so the two can never desync."""
+        nonlocal slice_end, ceiling
+        slice_end = end
+        ceiling = budget if end > budget else end
 
     def over_budget() -> bool:
         """A global safety valve tripped -- the whole enumeration is done."""
-        return ((limit is not None and len(out) >= limit) or
-                (work_budget is not None and work[0] >= work_budget))
+        return len(out) >= cap or work >= budget
 
     def stop() -> bool:
-        return over_budget() or (slice_end[0] is not None and work[0] >= slice_end[0])
+        """over_budget(), or the current first stage has spent its slice."""
+        return len(out) >= cap or work >= ceiling
 
-    def candidates(remaining, k, coax_sum, prev):
+    def candidates(rn, rd, k, coax_sum, prev):
         """Yield the (a, b) stages placeable at depth k, in canonical ascending order.
 
         Charges the work counter exactly as the old inline loops did: one unit per `a`
         slice computed, one per `b` scanned.
+
+        The bounds are computed in plain integers, not Fractions. This loop runs millions of
+        times per search and was ~85% of the engine's whole runtime as Fraction arithmetic
+        (four Fraction ops per `a`, each allocating an object and running gcd normalization).
+        The values are identical: child remaining = remaining * b / a must lie in [lo, hi]
+        with lo = (L/H)**(k-1) and hi = (H/L)**(k-1), so
+            b in [ a*lo/remaining , a*hi/remaining ]
+        and with remaining = rn/rd that lower bound is a * (pow_L[k-1]*rd) / (pow_H[k-1]*rn).
+        Both products are loop-invariant, leaving two int multiplies and two floor-divides
+        per `a`. Nothing needs reducing to lowest terms: floor and ceil of a rational do not
+        depend on its representation.
         """
+        nonlocal work
         pa, pb = prev                    # last placed stage; enforce (a, b) >= (pa, pb)
-        lo = Fraction(L, H) ** (k - 1)   # child ratio-range lower bound
-        hi = Fraction(H, L) ** (k - 1)   # child ratio-range upper bound
+        e = k - 1
+        lo_num, lo_den = pow_L[e] * rd, pow_H[e] * rn    # b_lo = ceil(a * lo_num / lo_den)
+        hi_num, hi_den = pow_H[e] * rd, pow_L[e] * rn    # b_hi = floor(a * hi_num / hi_den)
         for a in range(max(L, pa), H + 1):
-            work[0] += 1                 # count the per-a slice computation (bounds time)
-            # child remaining = remaining * b / a must be in [lo, hi]  =>
-            #   b in [ a*lo/remaining , a*hi/remaining ]
-            b_lo = max(L, math.ceil(a * lo / remaining))
-            b_hi = min(H, math.floor(a * hi / remaining))
-            if a == pa:                  # non-decreasing order: same driving -> driven >= pb
-                b_lo = max(b_lo, pb)
+            work += 1                    # count the per-a slice computation (bounds time)
+            b_lo = -((-a * lo_num) // lo_den)   # ceil(p/q) for positive p, q
+            if b_lo < L:
+                b_lo = L
+            b_hi = (a * hi_num) // hi_den
+            if b_hi > H:
+                b_hi = H
+            if a == pa and b_lo < pb:    # non-decreasing order: same driving -> driven >= pb
+                b_lo = pb
             if step_up:
-                b_hi = min(b_hi, a - 1)   # R2: driven < driving (step-up stage)
+                if b_hi > a - 1:
+                    b_hi = a - 1          # R2: driven < driving (step-up stage)
             elif step_down:
-                b_lo = max(b_lo, a + 1)   # R2: driven > driving (step-down stage)
+                if b_lo < a + 1:
+                    b_lo = a + 1          # R2: driven > driving (step-down stage)
             if coax_sum is not None:
                 # Coaxial stage after the first: b is forced to coax_sum - a. Test the
                 # single candidate instead of scanning (and rejecting) the whole slice.
                 b = coax_sum - a
                 if b_lo <= b <= b_hi and b != a:   # skip 1:1 (pass-through) stages
                     yield a, b
-            else:
+            elif b_lo <= b_hi:
+                # The guard is only a speed-up: the prune leaves most `a` with an empty
+                # slice, and skipping those avoids building a range + iterator per `a`.
                 for b in range(b_lo, b_hi + 1):
-                    work[0] += 1
+                    work += 1
                     if b != a:                     # skip 1:1 (pass-through) stages
                         yield a, b
 
@@ -418,18 +469,21 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
         else:
             dropped.add(key)              # exact but not single-plane buildable
 
-    def recurse(remaining: Fraction, k: int, stages: tuple, coax_sum, prev):
+    def recurse(rn: int, rd: int, k: int, stages: tuple, coax_sum, prev):
+        """`rn`/`rd` is the still-unplaced ratio, normalized (see _enumerate's docstring)."""
         if stop():
             return
         if k == 0:
-            if remaining == 1:
+            if rn == rd:                  # remaining == 1: the train is exact
                 leaf(stages)
             return
-        for a, b in candidates(remaining, k, coax_sum, prev):
+        for a, b in candidates(rn, rd, k, coax_sum, prev):
             # The first stage of a coaxial search fixes the shared sum S; once fixed it is
             # threaded down untouched (candidates() only forces b when coax_sum is set).
             next_sum = coax_sum if coax_sum is not None else (a + b if q.coaxial else None)
-            recurse(remaining * Fraction(b, a), k - 1,
+            cn, cd = rn * b, rd * a       # child remaining = remaining * b / a...
+            g = gcd(cn, cd)               # ...renormalized, to keep the ints small
+            recurse(cn // g, cd // g, k - 1,
                     stages + (Stage(a, b),), next_sum, (a, b))
             if stop():
                 return
@@ -438,7 +492,7 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
         # Nothing to spread. The coaxial rule collapses every stage AFTER the first to a single
         # candidate (b = S - a), so no first stage can own a disproportionately expensive
         # subtree -- there is no starvation to fix. A 1-stage train has no subtree at all.
-        recurse(target, n, (), None, (0, 0))
+        recurse(tn, td, n, (), None, (0, 0))
         cut_short = False
     else:
         # Budget-fair exploration (iterative broadening). Visit first stages in a
@@ -454,13 +508,13 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
         # exploring the stages we did find always keeps a share -- otherwise the listing spends
         # everything and the loop below never runs, returning nothing.
         if work_budget is not None:
-            slice_end[0] = work[0] + work_budget // 2
+            set_slice(work + work_budget // 2)
         pending = []
-        for cand in candidates(target, n, None, (0, 0)):
+        for cand in candidates(tn, td, n, None, (0, 0)):
             pending.append(cand)
             if stop():
                 break
-        slice_end[0] = None
+        set_slice(INF)
         pending = _spread(pending)
         allowance = FIRST_STAGE_SLICE
         while pending and not over_budget():
@@ -469,11 +523,13 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
                 if over_budget():
                     retry.append((a, b))       # never explored this pass -> still unfinished
                     continue
-                slice_end[0] = work[0] + allowance
-                recurse(target * Fraction(b, a), n - 1, (Stage(a, b),), None, (a, b))
-                if work[0] >= slice_end[0]:
+                set_slice(work + allowance)
+                cn, cd = tn * b, td * a
+                g = gcd(cn, cd)
+                recurse(cn // g, cd // g, n - 1, (Stage(a, b),), None, (a, b))
+                if work >= slice_end:
                     retry.append((a, b))       # hit its ceiling -> more of this subtree remains
-            slice_end[0] = None
+            set_slice(INF)
             pending = retry
             allowance *= 2
         cut_short = bool(pending)
@@ -598,7 +654,7 @@ def search(q: TrainQuery) -> SearchResult:
     truncated, dropped_total = _collect(q, seen, MAX_RESULTS)
 
     if not q.coaxial and len(seen) < MAX_RESULTS:
-        # Only when the general pass came up short. The extra pass is not free (measured ~6s
+        # Only when the general pass came up short. The extra pass is not free (measured ~0.3s
         # on wide queries), and a full pool is dominated by low-stage-count trains that
         # outrank late coaxial finds on _sort_key. NOTE that is a practical argument, not a
         # guarantee: when the pool filled from a level that was itself cut short, the 200+
