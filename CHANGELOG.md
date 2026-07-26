@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v2.1.0 (2026-07-26)
+
+### Features
+
+- **engine**: Spend the speed on coverage and drop the coaxial top-up
+  ([`b4bd2a8`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/b4bd2a89b8e3e45158e8f8ba0cb9bb88cedb551b))
+
+### Performance Improvements
+
+- **engine**: Run the gear-train DFS on ints instead of Fractions
+  ([`0346dbf`](https://github.com/LordRaptor/Fusion360PerfectPrintGears/commit/0346dbfba39bc4a5566b356780ffa64c5dcde11c))
+
+
 ## v2.0.0 (2026-07-26)
 
 ### Bug Fixes
