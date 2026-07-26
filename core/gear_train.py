@@ -13,7 +13,11 @@ from dataclasses import dataclass, field, replace
 from fractions import Fraction
 
 MAX_RESULTS = 200          # hard cap on returned trains; truncation is reported, never silent
-MIN_TEETH_WARN = 6         # cycloidal pinions below this are hard to print/cut (warning only)
+MIN_TEETH = 6              # hard floor: a cycloidal pinion below this cannot be cut or printed,
+                           #   and the generator command refuses to build one either
+MAX_TEETH = 150            # hard ceiling: the search space grows ~quadratically with the tooth
+                           #   span, and at this span a worst-case search already takes ~13s
+                           #   (the palette blocks for the whole search)
 GENERATE_LIMIT = 20000     # safety valve: max trains materialized per stage level (see _generate)
 WORK_BUDGET = 600_000      # safety valve: max stage placements explored per level (~4s worst
                            #   case; loose targets forced to high stage counts return partial,
@@ -121,9 +125,20 @@ class TrainQuery:
     clearance: int = 2
 
 
+def _searchable_stage_counts(q: TrainQuery) -> list:
+    """The stage counts search() will actually try: the requested range, raised to 2 when
+    coaxial (as normalize() does), then filtered by rotation parity -- every external mesh
+    reverses rotation, so 'same' admits only even counts and 'opposite' only odd ones.
+    """
+    lo = max(q.min_stages, 2 if q.coaxial else 1)
+    return [n for n in range(lo, q.max_stages + 1)
+            if not (q.direction == 'same' and n % 2)
+            and not (q.direction == 'opposite' and n % 2 == 0)]
+
+
 def validate(q: TrainQuery) -> list:
-    """Return a list of hard-error strings (empty == valid). Small teeth and the
-    coaxial min-stage bump are WARNINGS handled in normalize(), not errors here."""
+    """Return a list of hard-error strings (empty == valid). The coaxial min-stage bump is
+    a WARNING handled in normalize(), not an error here."""
     errors = []
     if q.target_num <= 0 or q.target_den <= 0:
         errors.append('Target ratio P and Q must both be positive integers.')
@@ -131,8 +146,12 @@ def validate(q: TrainQuery) -> list:
         errors.append('Target ratio must not be 1:1 — a pass-through train serves '
                       'no purpose. Add a 1:1 idler manually if you only need to '
                       'reverse direction.')
-    if q.teeth_min < 1:
-        errors.append('Minimum tooth count must be at least 1.')
+    if q.teeth_min < MIN_TEETH:
+        errors.append(f'Minimum tooth count must be at least {MIN_TEETH}: a cycloidal pinion '
+                      f'below that cannot be cut or printed.')
+    if q.teeth_max > MAX_TEETH:
+        errors.append(f'Maximum tooth count must be at most {MAX_TEETH}: the search space '
+                      f'grows faster than it can be explored beyond that.')
     if q.teeth_max < q.teeth_min:
         errors.append('Maximum tooth count must be >= minimum tooth count.')
     if q.min_stages < 1:
@@ -155,21 +174,52 @@ def validate(q: TrainQuery) -> list:
                           f'range ({q.teeth_min}-{q.teeth_max}).')
     if q.clearance < 0:
         errors.append('Clearance (teeth) must be 0 or greater.')
+
+    # Reachability. One stage changes speed by at most teeth_max/teeth_min, so n stages reach
+    # at most that to the n-th power. A target outside that window has NO exact train however
+    # long we search -- reject it with the stage count it would need, instead of running a slow
+    # search and handing back a bare empty list. Guarded on `not errors` because it needs the
+    # ratio and range checks above to have passed before its arithmetic means anything.
+    if not errors:
+        counts = _searchable_stage_counts(q)
+        if not counts:
+            errors.append(
+                f'No stage count between {q.min_stages} and {q.max_stages} can turn the output '
+                f'the {q.direction} way as the input: every mesh reverses rotation, so "same" '
+                f'needs an even number of stages and "opposite" an odd number.')
+        else:
+            span = Fraction(q.teeth_max, q.teeth_min)   # most one stage can change speed
+            target = Fraction(q.target_num, q.target_den)
+            reach = max(target, 1 / target)             # how far from 1:1 the train must travel
+            n = max(counts)
+            if span ** n < reach:
+                if span == 1:
+                    errors.append(
+                        f'With a single tooth count ({q.teeth_min}) every stage would be 1:1, '
+                        f'so no other ratio is reachable. Widen the tooth range.')
+                else:
+                    needed = n + 1
+                    while (span ** needed < reach
+                           or (q.direction == 'same' and needed % 2)
+                           or (q.direction == 'opposite' and needed % 2 == 0)):
+                        needed += 1
+                    errors.append(
+                        f'A {float(reach):g}x speed change is not reachable in {n} '
+                        f'stage{"s" if n > 1 else ""} with teeth {q.teeth_min}-{q.teeth_max}: '
+                        f'each stage can change speed by at most {float(span):g}x. '
+                        f'It needs at least {needed} stages.')
     return errors
 
 
 def normalize(q: TrainQuery):
-    """Return (adjusted_query, warnings). Coaxial forces >= 2 stages; very small tooth
-    counts are flagged. These are advisories, never errors."""
+    """Return (adjusted_query, warnings). Coaxial forces >= 2 stages. These are advisories,
+    never errors -- tooth counts are hard-limited in validate()."""
     warnings = []
     min_stages = q.min_stages
     if q.coaxial and min_stages < 2:
         min_stages = 2
         warnings.append('Coaxial input/output requires at least 2 stages; '
                         'raised the minimum stage count to 2.')
-    if q.teeth_min < MIN_TEETH_WARN:
-        warnings.append(f'Tooth counts below {MIN_TEETH_WARN} are hard to make as '
-                        f'cycloidal pinions; some results may be impractical to print.')
     return replace(q, min_stages=min_stages), warnings
 
 

@@ -142,9 +142,11 @@ def test_normalize_leaves_noncoaxial_alone():
     assert warnings == []
 
 
-def test_normalize_warns_on_small_teeth():
-    q, warnings = gt.normalize(_valid_query(teeth_min=4))
-    assert any('cycloidal' in w.lower() or str(gt.MIN_TEETH_WARN) in w for w in warnings)
+def test_validate_rejects_too_few_teeth():
+    # Below MIN_TEETH a cycloidal pinion cannot be made; this used to be a mere warning.
+    errs = gt.validate(_valid_query(teeth_min=4))
+    assert any('tooth' in e.lower() for e in errs)
+    assert gt.validate(_valid_query(teeth_min=1)) != []      # a 1-tooth gear is not a gear
 
 
 def _ratios(trains):
@@ -252,18 +254,20 @@ def test_search_warns_when_buildability_empties_results():
 
 def test_search_no_buildability_warning_when_no_exact_ratio():
     # No exact train exists at all (nothing is dropped for buildability), so the buildability
-    # warning must NOT fire. 7:1 in one stage over 6..8 is impossible.
-    q = _valid_query(target_num=7, target_den=1, min_stages=1, max_stages=1,
-                     teeth_min=6, teeth_max=8)
+    # warning must NOT fire. 7:5 over teeth 6..12 is reachable but has no exact pair in range.
+    q = _valid_query(target_num=7, target_den=5, min_stages=1, max_stages=1,
+                     teeth_min=6, teeth_max=12)
     res = gt.search(q)
     assert res.trains == []
     assert not any('buildable' in w.lower() for w in res.warnings)
 
 
 def test_search_empty_when_no_solution():
-    # 7 : 1 with a prime 7 that cannot be formed from teeth 8..12 in one stage.
-    q = _valid_query(target_num=7, target_den=1, min_stages=1, max_stages=1,
-                     teeth_min=8, teeth_max=12)
+    # 7:5 over teeth 6..12 in one stage. Reachable in principle (each stage can change speed
+    # by up to 12/6 = 2x, and 7/5 = 1.4x), so it passes the reachability check -- but no exact
+    # pair exists in range: (7,5) is below the minimum and (14,10) is above the maximum.
+    q = _valid_query(target_num=7, target_den=5, min_stages=1, max_stages=1,
+                     teeth_min=6, teeth_max=12)
     res = gt.search(q)
     assert res.trains == []
     assert res.error is None
@@ -1027,6 +1031,8 @@ def test_search_results_span_many_first_stages():
 
 
 def test_work_budget_scales_with_the_tooth_range():
+    # Calls _work_budget directly, so the teeth values here intentionally bypass validate()'s
+    # 6-150 limits -- this tests the scaling arithmetic, not what the UI accepts.
     # A span at or below REFERENCE_SPAN keeps exactly WORK_BUDGET, so narrow queries -- every
     # completeness parity test included -- are bit-for-bit unaffected by the scaling.
     narrow = _valid_query(teeth_min=6, teeth_max=24)
@@ -1203,3 +1209,70 @@ def test_search_deep_reduction_query_terminates_fast():
         assert 12 <= t.stages[-1].driven <= 44              # output bound honored
         assert all(s.driving < s.driven for s in t.stages)  # monotonic step-down
         assert len(t.stages) == 4                           # exactly the requested stage count
+
+
+def test_validate_rejects_too_many_teeth():
+    errs = gt.validate(_valid_query(teeth_max=gt.MAX_TEETH + 1))
+    assert any('tooth' in e.lower() for e in errs)
+
+
+def test_validate_accepts_the_tooth_limits_exactly():
+    # The limits are inclusive.
+    assert gt.validate(_valid_query(teeth_min=gt.MIN_TEETH, teeth_max=gt.MAX_TEETH)) == []
+
+
+def test_searchable_stage_counts_honours_parity_and_coaxial():
+    q = _valid_query(min_stages=1, max_stages=4)
+    assert gt._searchable_stage_counts(q) == [1, 2, 3, 4]
+    assert gt._searchable_stage_counts(_valid_query(
+        min_stages=1, max_stages=4, direction='same')) == [2, 4]
+    assert gt._searchable_stage_counts(_valid_query(
+        min_stages=1, max_stages=4, direction='opposite')) == [1, 3]
+    # Coaxial needs >= 2 stages, matching what normalize() enforces.
+    assert gt._searchable_stage_counts(_valid_query(
+        min_stages=1, max_stages=3, coaxial=True)) == [2, 3]
+
+
+def test_validate_rejects_unreachable_ratio():
+    # 3600:1 in 2 stages over teeth 8-150: each stage reaches at most 150/8 = 18.75x, so two
+    # stages reach 351.6x -- far short of 3600. The message must name the stages needed (3).
+    errs = gt.validate(_valid_query(target_num=3600, target_den=1, min_stages=2, max_stages=2,
+                                    teeth_min=8, teeth_max=150))
+    assert errs, 'an unreachable ratio must be rejected'
+    assert any('not reachable' in e for e in errs)
+    assert any('at least 3 stages' in e for e in errs)
+
+
+def test_validate_accepts_reachable_ratio():
+    # The same 3600:1 target with enough stages: 18.75**4 is ~123000 >= 3600.
+    assert gt.validate(_valid_query(target_num=3600, target_den=1, min_stages=4, max_stages=4,
+                                    teeth_min=8, teeth_max=150)) == []
+
+
+def test_validate_reachability_respects_direction_parity():
+    # direction='same' searches only EVEN stage counts, so the suggested minimum must be even
+    # too. 3600:1 needs 3 stages by magnitude, but 'same' cannot use 3 -> it must say 4.
+    errs = gt.validate(_valid_query(target_num=3600, target_den=1, min_stages=2, max_stages=2,
+                                    teeth_min=8, teeth_max=150, direction='same'))
+    assert any('at least 4 stages' in e for e in errs)
+
+
+def test_validate_rejects_when_no_stage_count_matches_the_direction():
+    # 'same' needs an even stage count, but the range 3..3 offers only an odd one.
+    errs = gt.validate(_valid_query(min_stages=3, max_stages=3, direction='same'))
+    assert errs
+    assert any('reverses rotation' in e for e in errs)
+
+
+def test_validate_rejects_single_tooth_count_range():
+    # teeth_min == teeth_max makes every stage 1:1, so nothing but 1:1 is reachable.
+    errs = gt.validate(_valid_query(teeth_min=20, teeth_max=20))
+    assert any('1:1' in e for e in errs)
+
+
+def test_search_reports_unreachable_ratio_as_an_error():
+    # End to end: an unreachable query is an ERROR with an explanation, not a slow empty list.
+    res = gt.search(_valid_query(target_num=3600, target_den=1, min_stages=2, max_stages=2,
+                                 teeth_min=8, teeth_max=150))
+    assert res.error is not None
+    assert res.trains == []
