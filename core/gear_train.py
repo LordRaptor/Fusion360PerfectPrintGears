@@ -19,11 +19,35 @@ WORK_BUDGET = 600_000      # safety valve: max stage placements explored per lev
                            #   case; loose targets forced to high stage counts return partial,
                            #   truncation-flagged results rather than hanging -- narrow ranges)
 
+REFERENCE_SPAN = 80          # tooth-range span WORK_BUDGET was tuned against (e.g. teeth 8-90)
+MAX_WORK_BUDGET = 3_000_000  # ceiling on the scaled budget, so the palette stays responsive
+
 FIRST_STAGE_SLICE = 2000   # budget-fair exploration: starting per-first-stage work allowance.
                            #   Each distinct first stage gets this many placements, then the
                            #   allowance doubles and the cut-short ones are revisited, until the
-                           #   space is exhausted or WORK_BUDGET is spent. Stops one small-gear
-                           #   prefix from draining the whole budget (see _enumerate).
+                           #   space is exhausted or the work budget is spent. Stops one
+                           #   small-gear prefix from draining the whole budget (see _enumerate).
+                           #   LOAD-BEARING and non-monotonic: a LARGER slice reaches FEWER
+                           #   first stages before the budget runs out, which reproduces the very
+                           #   starvation this fixes (measured: at 20000 the deep-reduction
+                           #   regression test finds nothing again). Retuning it must be
+                           #   validated by sweeping the value, not just by running the suite.
+
+
+def _work_budget(q: TrainQuery) -> int:
+    """Work budget for `q`, scaled by how big its search space is.
+
+    The number of candidate first stages grows ~quadratically with the tooth-range span, so a
+    fixed budget explores a vanishing fraction of a wide range: budget-fair exploration then
+    hands every first stage a slice too thin to reach any leaf, and the search comes back empty.
+    Scale with the span, capped by MAX_WORK_BUDGET for responsiveness. A span at or below
+    REFERENCE_SPAN keeps exactly WORK_BUDGET, so narrow queries -- including every completeness
+    parity test -- are bit-for-bit unaffected.
+    """
+    span = q.teeth_max - q.teeth_min + 1
+    scale = max(1.0, (span / REFERENCE_SPAN) ** 2)
+    return min(MAX_WORK_BUDGET, int(WORK_BUDGET * scale))
+
 
 BUILDABILITY_EMPTY_WARNING = (
     'No single-frame-buildable train found. Try raising the end-gear limit, adding a '
@@ -358,8 +382,9 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
                 return
 
     if q.coaxial or n == 1:
-        # Nothing to spread: the coaxial rule already collapses branching to one candidate
-        # per stage, and a 1-stage train has no completion subtree below its first stage.
+        # Nothing to spread. The coaxial rule collapses every stage AFTER the first to a single
+        # candidate (b = S - a), so no first stage can own a disproportionately expensive
+        # subtree -- there is no starvation to fix. A 1-stage train has no subtree at all.
         recurse(target, n, (), None, (0, 0))
         cut_short = False
     else:
@@ -367,10 +392,23 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
         # low-discrepancy order so a short run still reaches the large-gear region, and cap
         # each one's subtree; then double the allowance and revisit the ones that were cut
         # off. Re-exploring repeats work, but `out`/`dropped` are keyed so it cannot
-        # duplicate results, and doubling bounds the redundancy to ~2x. When the space is
-        # small every first stage completes on some pass, `pending` empties, and the result
-        # set is exactly what an unbounded plain DFS would produce.
-        pending = _spread(list(candidates(target, n, None, (0, 0))))
+        # duplicate results, and the doubling keeps the total near 2x the LAST allowance used
+        # (up to ~4x a subtree's true cost, when that cost sits just past a doubling step).
+        # When the space is small every first stage completes on some pass, `pending` empties,
+        # and the result set is exactly what an unbounded plain DFS would produce.
+        # Listing the first stages is itself work, and on a very wide range it alone can cost
+        # more than the whole budget (measured ~4M units for teeth 1-2000). Cap it at half, so
+        # exploring the stages we did find always keeps a share -- otherwise the listing spends
+        # everything and the loop below never runs, returning nothing.
+        if work_budget is not None:
+            slice_end[0] = work[0] + work_budget // 2
+        pending = []
+        for cand in candidates(target, n, None, (0, 0)):
+            pending.append(cand)
+            if stop():
+                break
+        slice_end[0] = None
+        pending = _spread(pending)
         allowance = FIRST_STAGE_SLICE
         while pending and not over_budget():
             retry = []
@@ -428,7 +466,7 @@ def search(q: TrainQuery) -> SearchResult:
         if q.direction == 'opposite' and n % 2 == 0:
             continue
         level, level_truncated, level_dropped = _enumerate(q, n, limit=GENERATE_LIMIT,
-                                                            work_budget=WORK_BUDGET)
+                                                            work_budget=_work_budget(q))
         dropped_total += level_dropped
         if level_truncated:
             truncated = True          # a safety valve tripped -> this level was cut short

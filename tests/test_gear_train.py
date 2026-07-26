@@ -1001,3 +1001,55 @@ def test_search_reaches_large_first_stage_trains():
     assert res.trains, 'budget-fair exploration must reach this deep reduction'
     keys = {tuple(sorted((s.driving, s.driven) for s in t.stages)) for t in res.trains}
     assert ((12, 45), (12, 45), (12, 48), (30, 32)) in keys
+    # The exact key above is tied to FIRST_STAGE_SLICE's default; this is the property that
+    # must hold regardless of tuning -- some train is built on a first stage whose driven gear
+    # is far above the small corner the old DFS never escaped (its first stage was (12,13)).
+    assert any(t.stages[0].driven >= 40 for t in res.trains), \
+        f'no train reached a large-driven first stage: {sorted(keys)}'
+
+
+def _first_stages(trains):
+    return {(t.stages[0].driving, t.stages[0].driven) for t in trains}
+
+
+def test_search_results_span_many_first_stages():
+    # The "200 clones" complaint, pinned. Measured on the OLD engine this exact query returned
+    # 200 trains sharing exactly ONE displayed first stage; budget-fair exploration returns
+    # trains spanning ~38. This is the anti-clone property the whole change exists for, and it
+    # is what makes the lower train COUNT on such queries a feature, not a regression: the two
+    # result sets are disjoint -- clones traded for variety.
+    q = _valid_query(target_num=1, target_den=60, min_stages=4, max_stages=4,
+                     teeth_min=8, teeth_max=90)
+    res = gt.search(q)
+    assert res.trains
+    assert len(_first_stages(res.trains)) >= 15, \
+        f'results clustered on {len(_first_stages(res.trains))} first stage(s)'
+
+
+def test_work_budget_scales_with_the_tooth_range():
+    # A span at or below REFERENCE_SPAN keeps exactly WORK_BUDGET, so narrow queries -- every
+    # completeness parity test included -- are bit-for-bit unaffected by the scaling.
+    narrow = _valid_query(teeth_min=6, teeth_max=24)
+    assert gt._work_budget(narrow) == gt.WORK_BUDGET
+    assert gt._work_budget(_valid_query(teeth_min=8, teeth_max=87)) == gt.WORK_BUDGET
+    # A wider span buys proportionally more budget (quadratic in the span)...
+    wide = _valid_query(teeth_min=8, teeth_max=167)          # span 160 == 2x REFERENCE_SPAN
+    assert gt._work_budget(wide) == 4 * gt.WORK_BUDGET
+    # ...but never more than the responsiveness ceiling.
+    assert gt._work_budget(_valid_query(teeth_min=1, teeth_max=2000)) == gt.MAX_WORK_BUDGET
+
+
+def test_search_wide_tooth_range_still_finds_varied_trains():
+    # A wide-but-plausible range (teeth 8-120, well past the 8-90 palette default) is where the
+    # fixed 600k budget used to spread too thinly to reach any leaf. With the span-scaled budget
+    # it returns trains across many first stages. Measured: ~101 trains over ~44 first stages.
+    q = _valid_query(target_num=1, target_den=60, min_stages=4, max_stages=4,
+                     teeth_min=8, teeth_max=120)
+    t0 = time.perf_counter()
+    res = gt.search(q)
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 25.0, f'wide range took {elapsed:.1f}s'
+    assert res.trains, 'a wide range must still return trains'
+    assert all(t.ratio() == Fraction(1, 60) for t in res.trains)
+    assert len(_first_stages(res.trains)) >= 10, \
+        f'wide-range results clustered on {len(_first_stages(res.trains))} first stage(s)'
