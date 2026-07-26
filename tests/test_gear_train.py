@@ -949,8 +949,12 @@ def test_monotonic_composes_with_end_gear_bounds():
 
 
 def test_spread_is_a_permutation():
-    items = list(range(10))
-    assert sorted(gt._spread(items)) == items
+    # Exact powers of two (4, 8, 16) and the sizes either side of them: the reversed index
+    # can only overshoot `n` when n is NOT a power of two, so both cases must be covered or
+    # a regression in the bit-width could silently drop or duplicate first stages.
+    for n in (3, 4, 7, 8, 9, 16, 17, 100):
+        items = list(range(n))
+        assert sorted(gt._spread(items)) == items, f'not a permutation for n={n}'
 
 
 def test_spread_handles_tiny_lists():

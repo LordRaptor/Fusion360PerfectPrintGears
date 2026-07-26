@@ -216,11 +216,12 @@ def _spread(items) -> list:
     n = len(items)
     if n < 3:
         return list(items)
-    bits = (n - 1).bit_length()
+    bits = (n - 1).bit_length()      # narrowest width with 2**bits >= n
+    width = f'0{bits}b'
     order = []
     for i in range(1 << bits):
-        r = int(format(i, '0%db' % bits)[::-1], 2)
-        if r < n:
+        r = int(format(i, width)[::-1], 2)
+        if r < n:                    # reversal can overshoot when n is not a power of two
             order.append(items[r])
     return order
 
