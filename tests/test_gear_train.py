@@ -1172,3 +1172,34 @@ def test_coaxial_merge_is_skipped_once_the_pool_is_full():
     seen = {}
     gt._collect(*(gt.normalize(q)[0], seen, gt.MAX_RESULTS))
     assert len(seen) >= gt.MAX_RESULTS, 'the general pass alone must fill the pool here'
+
+
+def test_search_is_deterministic():
+    # Budget-fair exploration picks its visit order with _spread (bit reversal), not an RNG,
+    # and iterative broadening is a fixed schedule -- so repeated searches must be identical
+    # down to the ORDER of the results, not just the set. The palette re-runs searches freely,
+    # so a user changing an unrelated input and changing it back must see the same list.
+    q = _repro_query(teeth_max=60)
+    first = [tuple((s.driving, s.driven) for s in t.stages) for t in gt.search(q).trains]
+    second = [tuple((s.driving, s.driven) for s in t.stages) for t in gt.search(q).trains]
+    assert first, 'expected results or this test is vacuous'
+    assert first == second
+
+
+def test_search_deep_reduction_query_terminates_fast():
+    # The reported query runs a budget-fair general pass AND a coaxial-merge pass (the general
+    # pass comes up far short of the 200-cap, so the merge fires). The palette blocks while
+    # this runs, so guard the ceiling. Also re-checks that every constraint still holds on the
+    # trains this newly-reachable region produces.
+    t0 = time.perf_counter()
+    res = gt.search(_repro_query())
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 25.0, f'deep-reduction search took {elapsed:.1f}s'
+    assert res.trains
+    assert all(t.ratio() == Fraction(1, 60) for t in res.trains)
+    for t in res.trains:
+        assert gt._clearance_ok(t.stages, 2)                # still single-plane buildable
+        assert 12 <= t.stages[0].driving <= 44              # input bound honored
+        assert 12 <= t.stages[-1].driven <= 44              # output bound honored
+        assert all(s.driving < s.driven for s in t.stages)  # monotonic step-down
+        assert len(t.stages) == 4                           # exactly the requested stage count
