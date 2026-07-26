@@ -203,6 +203,15 @@ def _clearance_ok(order, clearance) -> bool:
     return True
 
 
+def _stage_key(stages) -> tuple:
+    """Direction-aware, order-independent identity of a stage multiset: the (driving, driven)
+    pairs, sorted. Two trains with the same key are the same train laid out differently, so
+    this is what both _enumerate and search() dedup on. `(72, 90)` and `(90, 72)` are
+    reciprocal stages and must stay distinct -- hence pairs, not sums.
+    """
+    return tuple(sorted((s.driving, s.driven) for s in stages))
+
+
 def _spread(items) -> list:
     """Return `items` reordered so that any PREFIX samples the whole list evenly.
 
@@ -310,7 +319,7 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
         """Gate a completed exact train and file it under its stage-multiset key."""
         if not q.monotonic and not _is_irreducible(stages):
             return                        # reducible -> drop, do not count
-        key = tuple(sorted((s.driving, s.driven) for s in stages))
+        key = _stage_key(stages)
         # Always-on single-plane buildability: keep the train only if some ordering
         # satisfies the end-gear bounds AND the clearance rule; store it in that order
         # (input -> output). in_lo..out_hi default to the full range when no end bounds
@@ -329,7 +338,8 @@ def _enumerate(q: TrainQuery, n: int, limit=None, work_budget=None):
                 leaf(stages)
             return
         for a, b in candidates(remaining, k, coax_sum, prev):
-            # The first stage of a coaxial search fixes the shared sum S.
+            # The first stage of a coaxial search fixes the shared sum S; once fixed it is
+            # threaded down untouched (candidates() only forces b when coax_sum is set).
             next_sum = coax_sum if coax_sum is not None else (a + b if q.coaxial else None)
             recurse(remaining * Fraction(b, a), k - 1,
                     stages + (Stage(a, b),), next_sum, (a, b))
@@ -354,8 +364,7 @@ class SearchResult:
 
 
 def _canonical(train: GearTrain) -> tuple:
-    # Direction-aware, order-independent key: (driving, driven) pairs, sorted.
-    return tuple(sorted((s.driving, s.driven) for s in train.stages))
+    return _stage_key(train.stages)
 
 
 def _sort_key(train: GearTrain) -> tuple:
