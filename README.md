@@ -218,3 +218,13 @@ This add-in is licensed under the **[Apache License 2.0](LICENSE)**. The license
 covers the add-in's source code only, not the underlying gear design method. See
 [`NOTICE`](NOTICE) for third-party attributions (the add-in scaffolding derives
 from Autodesk's Fusion 360 sample template).
+
+## Packaging a Fusion add-in release
+
+From the repository root, check out the release commit and run this command with Git (Bash or Git Bash). It packages the tracked runtime files under the folder name Fusion expects.
+
+```sh
+git archive --format=zip --prefix=PerfectPrintGears/ --output=PerfectPrintGears-universal.zip HEAD -- PerfectPrintGears.manifest PerfectPrintGears.py NOTICE commands config.py core lib LICENSE
+```
+
+Upload `PerfectPrintGears-universal.zip` as an asset of a stable GitHub Release. Use a numeric tag such as `v2.1.0` matching the version in `PerfectPrintGears.manifest`.
